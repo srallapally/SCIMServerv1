@@ -1,5 +1,6 @@
 package com.pingidentity.p1aic.scim.client;
 
+import com.pingidentity.p1aic.scim.auth.OAuthTokenManager;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
@@ -13,11 +14,9 @@ import java.util.logging.Logger;
 /**
  * Base REST client for making authenticated calls to PingIDM REST APIs.
  *
- * This client automatically adds required PingIDM headers and uses the OAuth
- * access token stored in ThreadLocal for the current request thread.
- *
- * The OAuth token is set by OAuthTokenFilter at the start of each request
- * and automatically cleaned up after the request completes.
+ * This client automatically adds required PingIDM headers and uses OAuth tokens:
+ * - For incoming SCIM requests: Uses the Bearer token from the request (stored in ThreadLocal)
+ * - For server startup/config: Uses OAuth client credentials to obtain tokens
  */
 public class PingIdmRestClient {
 
@@ -34,6 +33,10 @@ public class PingIdmRestClient {
     private final Client client;
     private final ScimServerConfig config;
 
+    // BEGIN: Add OAuth token manager for server-to-server auth
+    private final OAuthTokenManager tokenManager;
+    // END: Add OAuth token manager
+
     // ThreadLocal to store OAuth token for current request thread
     private static final ThreadLocal<String> currentOAuthToken = new ThreadLocal<>();
 
@@ -43,6 +46,9 @@ public class PingIdmRestClient {
     public PingIdmRestClient() {
         this.client = ClientBuilder.newClient();
         this.config = ScimServerConfig.getInstance();
+        // BEGIN: Initialize token manager
+        this.tokenManager = new OAuthTokenManager();
+        // END: Initialize token manager
     }
 
     /**
@@ -85,7 +91,7 @@ public class PingIdmRestClient {
     }
 
     /**
-     * Build a request with standard PingIDM headers and OAuth token.
+     * Build a request with standard PingIDM headers and OAuth token from ThreadLocal.
      *
      * @param target the WebTarget to build the request from
      * @return Invocation.Builder with headers configured
@@ -108,6 +114,30 @@ public class PingIdmRestClient {
         return builder;
     }
 
+    // BEGIN: Add method for config endpoints using server OAuth token
+    /**
+     * Build a request for config/admin endpoints using server's OAuth credentials.
+     * This is used during server startup when there's no incoming request token.
+     *
+     * @param target the WebTarget to build the request from
+     * @return Invocation.Builder with headers configured
+     * @throws Exception if token acquisition fails
+     */
+    private Invocation.Builder buildRequestWithServerToken(WebTarget target) throws Exception {
+        Invocation.Builder builder = target.request(MediaType.APPLICATION_JSON);
+
+        // Add PingIDM API version header
+        builder.header(HEADER_ACCEPT_API_VERSION, API_VERSION_RESOURCE);
+
+        // Get server OAuth token via client credentials
+        String token = tokenManager.getAccessToken();
+        builder.header(HEADER_AUTHORIZATION, "Bearer " + token);
+        LOGGER.fine("Added server OAuth token to config request");
+
+        return builder;
+    }
+    // END: Add method for config endpoints
+
     /**
      * Execute GET request to PingIDM.
      *
@@ -118,6 +148,21 @@ public class PingIdmRestClient {
         WebTarget target = target(endpointUrl);
         return buildRequest(target).get();
     }
+
+    // BEGIN: Add method for config endpoint GET requests
+    /**
+     * Execute GET request to PingIDM config endpoints using server OAuth credentials.
+     * Used during server startup for administrative operations.
+     *
+     * @param endpointUrl the PingIDM endpoint URL
+     * @return Response from PingIDM
+     * @throws Exception if request fails
+     */
+    public Response getConfig(String endpointUrl) throws Exception {
+        WebTarget target = target(endpointUrl);
+        return buildRequestWithServerToken(target).get();
+    }
+    // END: Add method for config endpoints
 
     /**
      * Execute GET request with query parameters.
@@ -299,5 +344,10 @@ public class PingIdmRestClient {
             client.close();
             LOGGER.info("PingIDM REST client closed");
         }
+        // BEGIN: Close token manager
+        if (tokenManager != null) {
+            tokenManager.close();
+        }
+        // END: Close token manager
     }
 }

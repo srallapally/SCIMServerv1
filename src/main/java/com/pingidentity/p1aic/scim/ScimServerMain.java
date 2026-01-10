@@ -36,8 +36,10 @@ public class ScimServerMain {
             String scimServerBaseUrl = getScimServerBaseUrl(port);
             String realm = getEnvOrDefault("SCIM_REALM", "scim");
             String pingIdmBaseUrl = getRequiredEnv("PINGIDM_BASE_URL");
-            String pingIdmUsername = getRequiredEnv("PINGIDM_USERNAME");
-            String pingIdmPassword = getRequiredEnv("PINGIDM_PASSWORD");
+            String oauthTokenUrl = getRequiredEnv("OAUTH_TOKEN_URL");
+            String oauthClientId = getRequiredEnv("OAUTH_CLIENT_ID");
+            String oauthClientSecret = getRequiredEnv("OAUTH_CLIENT_SECRET");
+            String oauthScope = getEnvOrDefault("OAUTH_SCOPE", "");
             String managedUserObject = getEnvOrDefault("PINGIDM_MANAGED_USER_OBJECT", "alpha_user");
             String managedRoleObject = getEnvOrDefault("PINGIDM_MANAGED_ROLE_OBJECT", "alpha_role");
 
@@ -51,8 +53,10 @@ public class ScimServerMain {
             config.setScimServerBaseUrl(scimServerBaseUrl);
             config.setRealm(realm);
             config.setPingIdmBaseUrl(pingIdmBaseUrl);
-            config.setPingIdmUsername(pingIdmUsername);
-            config.setPingIdmPassword(pingIdmPassword);
+            config.setOauthTokenUrl(oauthTokenUrl);
+            config.setOauthClientId(oauthClientId);
+            config.setOauthClientSecret(oauthClientSecret);
+            config.setOauthScope(oauthScope);
             config.setManagedUserObjectName(managedUserObject);
             config.setManagedRoleObjectName(managedRoleObject);
 

@@ -47,8 +47,10 @@ public class PingIdmConfigService {
             // Get config endpoint URL
             String endpoint = restClient.getConfigManagedEndpoint();
 
-            // Call PingIDM config API
-            Response response = restClient.get(endpoint);
+            // BEGIN: Use getConfig for OAuth client credentials authentication
+            // Call PingIDM config API (uses server OAuth token)
+            Response response = restClient.getConfig(endpoint);
+            // END: Use getConfig
 
             // Check response status
             if (response.getStatus() != Response.Status.OK.getStatusCode()) {

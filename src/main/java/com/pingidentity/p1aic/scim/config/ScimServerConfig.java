@@ -1,17 +1,19 @@
 package com.pingidentity.p1aic.scim.config;
 
-/**
- * Singleton configuration class for SCIM Server.
- * Holds PingIDM connection details, SCIM server URLs, and endpoint configurations.
- */
 public class ScimServerConfig {
 
     private static ScimServerConfig instance;
 
     // PingIDM Configuration
     private String pingIdmBaseUrl;
-    private String pingIdmUsername;
-    private String pingIdmPassword;
+
+    // BEGIN: Remove unused username/password, add OAuth config
+    // OAuth Configuration
+    private String oauthTokenUrl;
+    private String oauthClientId;
+    private String oauthClientSecret;
+    private String oauthScope;
+    // END: Add OAuth config
 
     // SCIM Server Configuration
     private String scimServerBaseUrl;
@@ -50,21 +52,39 @@ public class ScimServerConfig {
         }
     }
 
-    public String getPingIdmUsername() {
-        return pingIdmUsername;
+    // BEGIN: Add OAuth getters/setters
+    public String getOauthTokenUrl() {
+        return oauthTokenUrl;
     }
 
-    public void setPingIdmUsername(String pingIdmUsername) {
-        this.pingIdmUsername = pingIdmUsername;
+    public void setOauthTokenUrl(String oauthTokenUrl) {
+        this.oauthTokenUrl = oauthTokenUrl;
     }
 
-    public String getPingIdmPassword() {
-        return pingIdmPassword;
+    public String getOauthClientId() {
+        return oauthClientId;
     }
 
-    public void setPingIdmPassword(String pingIdmPassword) {
-        this.pingIdmPassword = pingIdmPassword;
+    public void setOauthClientId(String oauthClientId) {
+        this.oauthClientId = oauthClientId;
     }
+
+    public String getOauthClientSecret() {
+        return oauthClientSecret;
+    }
+
+    public void setOauthClientSecret(String oauthClientSecret) {
+        this.oauthClientSecret = oauthClientSecret;
+    }
+
+    public String getOauthScope() {
+        return oauthScope;
+    }
+
+    public void setOauthScope(String oauthScope) {
+        this.oauthScope = oauthScope;
+    }
+    // END: Add OAuth getters/setters
 
     // SCIM Server Configuration
 
