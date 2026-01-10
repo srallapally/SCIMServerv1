@@ -58,6 +58,17 @@ public class DynamicSchemaManager {
         this.attributeCache = new HashMap<>();
     }
 
+    @Inject
+    public DynamicSchemaManager(PingIdmConfigService configService, ScimSchemaBuilder schemaBuilder) {
+        this.configService = configService;
+        this.schemaBuilder = schemaBuilder;
+
+        // Initialize standard fields
+        this.config = ScimServerConfig.getInstance();
+        this.lock = new ReentrantReadWriteLock();
+        this.schemaCache = new HashMap<>();
+        this.attributeCache = new HashMap<>();
+    }
     /**
      * Initialize schemas on startup.
      * This method is called automatically after dependency injection.

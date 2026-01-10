@@ -1,106 +1,130 @@
 package com.pingidentity.p1aic.scim.config;
 
-import java.util.Optional;
-
 /**
- * Configuration class for SCIM Server settings.
- * Reads configuration from environment variables or system properties.
+ * Singleton configuration class for SCIM Server.
+ * Holds PingIDM connection details, SCIM server URLs, and endpoint configurations.
  */
 public class ScimServerConfig {
 
-    private static final String PINGIDM_BASE_URL_KEY = "PINGIDM_BASE_URL";
-    private static final String PINGIDM_REALM_KEY = "PINGIDM_REALM";
-    private static final String SCIM_SERVER_BASE_URL_KEY = "SCIM_SERVER_BASE_URL";
+    private static ScimServerConfig instance;
 
-    // Default values
-    private static final String DEFAULT_PINGIDM_BASE_URL = "https://localhost:8443";
-    private static final String DEFAULT_REALM = "alpha";
-    private static final String DEFAULT_SCIM_SERVER_BASE_URL = "http://localhost:8080/scim/v2";
+    // PingIDM Configuration
+    private String pingIdmBaseUrl;
+    private String pingIdmUsername;
+    private String pingIdmPassword;
 
-    private final String pingIdmBaseUrl;
-    private final String realm;
-    private final String scimServerBaseUrl;
+    // SCIM Server Configuration
+    private String scimServerBaseUrl;
+    private String realm;
 
-    // Singleton instance
-    private static final ScimServerConfig INSTANCE = new ScimServerConfig();
+    // Managed Object Names (configurable)
+    private String managedUserObjectName = "alpha_user";
+    private String managedRoleObjectName = "alpha_role";
 
-    /**
-     * Private constructor - loads configuration from environment variables or system properties.
-     */
     private ScimServerConfig() {
-        this.pingIdmBaseUrl = getConfigValue(PINGIDM_BASE_URL_KEY, DEFAULT_PINGIDM_BASE_URL);
-        this.realm = getConfigValue(PINGIDM_REALM_KEY, DEFAULT_REALM);
-        this.scimServerBaseUrl = getConfigValue(SCIM_SERVER_BASE_URL_KEY, DEFAULT_SCIM_SERVER_BASE_URL);
+        // Private constructor for singleton
+        // Set default realm
+        this.realm = "scim";
     }
 
     /**
-     * Get singleton instance of configuration.
+     * Get singleton instance.
      */
-    public static ScimServerConfig getInstance() {
-        return INSTANCE;
+    public static synchronized ScimServerConfig getInstance() {
+        if (instance == null) {
+            instance = new ScimServerConfig();
+        }
+        return instance;
     }
 
-    /**
-     * Get PingIDM base URL (e.g., https://idm.example.com:8443).
-     */
+    // PingIDM Configuration
+
     public String getPingIdmBaseUrl() {
         return pingIdmBaseUrl;
     }
 
-    /**
-     * Get PingIDM realm name (e.g., "alpha").
-     */
-    public String getRealm() {
-        return realm;
+    public void setPingIdmBaseUrl(String pingIdmBaseUrl) {
+        this.pingIdmBaseUrl = pingIdmBaseUrl;
+        if (pingIdmBaseUrl != null && pingIdmBaseUrl.endsWith("/")) {
+            this.pingIdmBaseUrl = pingIdmBaseUrl.substring(0, pingIdmBaseUrl.length() - 1);
+        }
     }
 
-    /**
-     * Get SCIM server base URL (used for generating resource locations).
-     */
+    public String getPingIdmUsername() {
+        return pingIdmUsername;
+    }
+
+    public void setPingIdmUsername(String pingIdmUsername) {
+        this.pingIdmUsername = pingIdmUsername;
+    }
+
+    public String getPingIdmPassword() {
+        return pingIdmPassword;
+    }
+
+    public void setPingIdmPassword(String pingIdmPassword) {
+        this.pingIdmPassword = pingIdmPassword;
+    }
+
+    // SCIM Server Configuration
+
     public String getScimServerBaseUrl() {
         return scimServerBaseUrl;
     }
 
+    public void setScimServerBaseUrl(String scimServerBaseUrl) {
+        this.scimServerBaseUrl = scimServerBaseUrl;
+        if (scimServerBaseUrl != null && scimServerBaseUrl.endsWith("/")) {
+            this.scimServerBaseUrl = scimServerBaseUrl.substring(0, scimServerBaseUrl.length() - 1);
+        }
+    }
+
+    public String getRealm() {
+        return realm;
+    }
+
+    public void setRealm(String realm) {
+        this.realm = realm;
+    }
+
+    // Managed Object Configuration
+
+    public String getManagedUserObjectName() {
+        return managedUserObjectName;
+    }
+
+    public void setManagedUserObjectName(String managedUserObjectName) {
+        this.managedUserObjectName = managedUserObjectName;
+    }
+
+    public String getManagedRoleObjectName() {
+        return managedRoleObjectName;
+    }
+
+    public void setManagedRoleObjectName(String managedRoleObjectName) {
+        this.managedRoleObjectName = managedRoleObjectName;
+    }
+
+    // PingIDM Endpoint URLs
+
     /**
-     * Get full managed users endpoint URL.
-     * Format: {baseUrl}/openidm/managed/{realm}_user
+     * Get the managed users endpoint URL.
      */
     public String getManagedUsersEndpoint() {
-        return String.format("%s/openidm/managed/%s_user", pingIdmBaseUrl, realm);
+        return pingIdmBaseUrl + "/openidm/managed/" + managedUserObjectName;
     }
 
     /**
-     * Get full managed roles endpoint URL.
-     * Format: {baseUrl}/openidm/managed/{realm}_role
+     * Get the managed roles endpoint URL.
      */
     public String getManagedRolesEndpoint() {
-        return String.format("%s/openidm/managed/%s_role", pingIdmBaseUrl, realm);
+        return pingIdmBaseUrl + "/openidm/managed/" + managedRoleObjectName;
     }
 
     /**
-     * Get PingIDM config endpoint URL.
-     * Format: {baseUrl}/openidm/config/managed
+     * Get the config managed endpoint URL.
      */
     public String getConfigManagedEndpoint() {
-        return String.format("%s/openidm/config/managed", pingIdmBaseUrl);
-    }
-
-    /**
-     * Helper method to get configuration value from environment variable or system property.
-     * Environment variables take precedence over system properties.
-     */
-    private String getConfigValue(String key, String defaultValue) {
-        return Optional.ofNullable(System.getenv(key))
-                .or(() -> Optional.ofNullable(System.getProperty(key)))
-                .orElse(defaultValue);
-    }
-
-    @Override
-    public String toString() {
-        return "ScimServerConfig{" +
-                "pingIdmBaseUrl='" + pingIdmBaseUrl + '\'' +
-                ", realm='" + realm + '\'' +
-                ", scimServerBaseUrl='" + scimServerBaseUrl + '\'' +
-                '}';
+        return pingIdmBaseUrl + "/openidm/config/managed";
     }
 }

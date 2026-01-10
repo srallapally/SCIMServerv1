@@ -41,6 +41,13 @@ public class PingIdmUserService {
         this.objectMapper = new ObjectMapper();
     }
 
+    @Inject
+    public PingIdmUserService(PingIdmRestClient restClient) {
+        this.restClient = restClient;
+        this.attributeMapper = new UserAttributeMapper();
+        this.objectMapper = new ObjectMapper();
+    }
+
     /**
      * Create a new user in PingIDM.
      *

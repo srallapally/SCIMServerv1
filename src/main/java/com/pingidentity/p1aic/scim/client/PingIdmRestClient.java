@@ -1,8 +1,6 @@
 package com.pingidentity.p1aic.scim.client;
 
-import com.pingidentity.p1aic.scim.auth.OAuthContext;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
-import jakarta.inject.Inject;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.Entity;
@@ -15,8 +13,11 @@ import java.util.logging.Logger;
 /**
  * Base REST client for making authenticated calls to PingIDM REST APIs.
  *
- * This client automatically adds required PingIDM headers and passes through
- * the OAuth access token from the current request context.
+ * This client automatically adds required PingIDM headers and uses the OAuth
+ * access token stored in ThreadLocal for the current request thread.
+ *
+ * The OAuth token is set by OAuthTokenFilter at the start of each request
+ * and automatically cleaned up after the request completes.
  */
 public class PingIdmRestClient {
 
@@ -33,8 +34,8 @@ public class PingIdmRestClient {
     private final Client client;
     private final ScimServerConfig config;
 
-    @Inject
-    private OAuthContext oauthContext;
+    // ThreadLocal to store OAuth token for current request thread
+    private static final ThreadLocal<String> currentOAuthToken = new ThreadLocal<>();
 
     /**
      * Constructor initializes JAX-RS client.
@@ -42,6 +43,35 @@ public class PingIdmRestClient {
     public PingIdmRestClient() {
         this.client = ClientBuilder.newClient();
         this.config = ScimServerConfig.getInstance();
+    }
+
+    /**
+     * Set the OAuth token for the current request thread.
+     * This should be called by OAuthTokenFilter at the start of each request.
+     *
+     * @param token the OAuth Bearer token
+     */
+    public static void setCurrentOAuthToken(String token) {
+        currentOAuthToken.set(token);
+        LOGGER.fine("OAuth token set for current thread");
+    }
+
+    /**
+     * Clear the OAuth token after request completes.
+     * This should be called by OAuthTokenFilter in the response filter.
+     */
+    public static void clearCurrentOAuthToken() {
+        currentOAuthToken.remove();
+        LOGGER.fine("OAuth token cleared for current thread");
+    }
+
+    /**
+     * Get the OAuth token for the current request thread.
+     *
+     * @return the OAuth token, or null if not set
+     */
+    private String getCurrentOAuthToken() {
+        return currentOAuthToken.get();
     }
 
     /**
@@ -66,11 +96,13 @@ public class PingIdmRestClient {
         // Add PingIDM API version header
         builder.header(HEADER_ACCEPT_API_VERSION, API_VERSION_RESOURCE);
 
-        // Add OAuth Bearer token from request context
-        if (oauthContext != null && oauthContext.hasAccessToken()) {
-            builder.header(HEADER_AUTHORIZATION, "Bearer " + oauthContext.getAccessToken());
+        // Add OAuth Bearer token from ThreadLocal
+        String token = getCurrentOAuthToken();
+        if (token != null && !token.isEmpty()) {
+            builder.header(HEADER_AUTHORIZATION, "Bearer " + token);
+            LOGGER.fine("Added OAuth Bearer token to request");
         } else {
-            LOGGER.warning("No OAuth access token available in context");
+            LOGGER.warning("No OAuth access token available for PingIDM request");
         }
 
         return builder;
@@ -265,6 +297,7 @@ public class PingIdmRestClient {
     public void close() {
         if (client != null) {
             client.close();
+            LOGGER.info("PingIDM REST client closed");
         }
     }
 }

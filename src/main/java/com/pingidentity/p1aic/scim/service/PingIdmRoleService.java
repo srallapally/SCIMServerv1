@@ -42,6 +42,13 @@ public class PingIdmRoleService {
         this.objectMapper = new ObjectMapper();
     }
 
+    @Inject
+    public PingIdmRoleService(PingIdmRestClient restClient) {
+        this.restClient = restClient;
+        this.attributeMapper = new GroupAttributeMapper();
+        this.objectMapper = new ObjectMapper();
+    }
+
     /**
      * Create a new role in PingIDM.
      *

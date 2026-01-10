@@ -1,91 +1,113 @@
 package com.pingidentity.p1aic.scim.auth;
 
-import jakarta.annotation.Priority;
-import jakarta.inject.Inject;
-import jakarta.ws.rs.Priorities;
+import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
+import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
+import jakarta.ws.rs.container.ContainerResponseContext;
+import jakarta.ws.rs.container.ContainerResponseFilter;
+import jakarta.ws.rs.container.PreMatching;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
-import java.io.IOException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * JAX-RS filter that extracts OAuth Bearer token from Authorization header
- * and stores it in the request-scoped OAuthContext for downstream use.
+ * JAX-RS filter for OAuth Bearer token authentication.
  *
- * This filter runs early in the request processing chain to ensure the token
- * is available for all subsequent filters and endpoints.
+ * This filter:
+ * 1. Extracts the Bearer token from the Authorization header
+ * 2. Validates that the token is present and properly formatted
+ * 3. Stores the token in ThreadLocal for PingIdmRestClient to use
+ * 4. Cleans up the ThreadLocal after the request completes
+ *
+ * Certain endpoints (ServiceProviderConfig, Schemas, ResourceTypes) are
+ * exempt from authentication as per SCIM 2.0 specification.
  */
 @Provider
-@Priority(Priorities.AUTHENTICATION)
-public class OAuthTokenFilter implements ContainerRequestFilter {
+@PreMatching
+public class OAuthTokenFilter implements ContainerRequestFilter, ContainerResponseFilter {
 
-    private static final String AUTHORIZATION_HEADER = "Authorization";
-    private static final String BEARER_PREFIX = "Bearer ";
+    private static final Logger logger = LoggerFactory.getLogger(OAuthTokenFilter.class);
 
-    @Inject
-    private OAuthContext oauthContext;
+    // SCIM endpoints that don't require authentication
+    private static final String[] PUBLIC_PATHS = {
+            "/ServiceProviderConfig",
+            "/Schemas",
+            "/ResourceTypes"
+    };
 
     @Override
-    public void filter(ContainerRequestContext requestContext) throws IOException {
-        // Skip token extraction for discovery endpoints (they may not require auth)
+    public void filter(ContainerRequestContext requestContext) {
         String path = requestContext.getUriInfo().getPath();
-        if (isDiscoveryEndpoint(path)) {
-            return;
+
+        // Skip authentication for public endpoints
+        for (String publicPath : PUBLIC_PATHS) {
+            if (path.endsWith(publicPath)) {
+                logger.debug("Skipping authentication for public endpoint: {}", path);
+                return;
+            }
         }
 
         // Extract Authorization header
-        String authHeader = requestContext.getHeaderString(AUTHORIZATION_HEADER);
+        String authHeader = requestContext.getHeaderString("Authorization");
 
-        if (authHeader == null || authHeader.trim().isEmpty()) {
-            // No Authorization header present
+        if (authHeader == null || authHeader.isEmpty()) {
+            logger.warn("Missing Authorization header for path: {}", path);
             abortWithUnauthorized(requestContext, "Missing Authorization header");
             return;
         }
 
-        if (!authHeader.startsWith(BEARER_PREFIX)) {
-            // Authorization header doesn't start with "Bearer "
-            abortWithUnauthorized(requestContext, "Invalid Authorization header format. Expected 'Bearer <token>'");
+        // Validate Bearer token format
+        if (!authHeader.toLowerCase().startsWith("bearer ")) {
+            logger.warn("Invalid Authorization header format for path: {}", path);
+            abortWithUnauthorized(requestContext, "Invalid Authorization header format");
             return;
         }
 
         // Extract token (remove "Bearer " prefix)
-        String token = authHeader.substring(BEARER_PREFIX.length()).trim();
+        String token = authHeader.substring(7).trim();
 
         if (token.isEmpty()) {
-            // Empty token after "Bearer " prefix
-            abortWithUnauthorized(requestContext, "Empty bearer token");
+            logger.warn("Empty Bearer token for path: {}", path);
+            abortWithUnauthorized(requestContext, "Empty Bearer token");
             return;
         }
 
-        // Store token in request-scoped context
-        oauthContext.setAccessToken(token);
+        // Store token in ThreadLocal for PingIdmRestClient to use
+        PingIdmRestClient.setCurrentOAuthToken(token);
+        logger.debug("OAuth token extracted and stored for request to: {}", path);
+    }
+
+    @Override
+    public void filter(ContainerRequestContext requestContext,
+                       ContainerResponseContext responseContext) {
+        // Clean up ThreadLocal after request completes (success or failure)
+        PingIdmRestClient.clearCurrentOAuthToken();
+        logger.debug("OAuth token cleared after request completion");
     }
 
     /**
-     * Check if the request path is for a discovery endpoint that may not require authentication.
-     * Discovery endpoints: /ServiceProviderConfig, /ResourceTypes, /Schemas
+     * Abort the request with 401 Unauthorized response.
+     *
+     * @param requestContext the request context
+     * @param message the error message
      */
-    private boolean isDiscoveryEndpoint(String path) {
-        return path.endsWith("/ServiceProviderConfig") ||
-                path.endsWith("/ResourceTypes") ||
-                path.endsWith("/Schemas");
-    }
+    private void abortWithUnauthorized(ContainerRequestContext requestContext, String message) {
+        ScimServerConfig config = ScimServerConfig.getInstance();
+        String realm = config.getRealm();
 
-    /**
-     * Abort the request with 401 Unauthorized and SCIM error response.
-     */
-    private void abortWithUnauthorized(ContainerRequestContext requestContext, String detail) {
         // Build SCIM-compliant error response
         String errorResponse = String.format(
                 "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
                         "\"status\":\"401\"," +
                         "\"detail\":\"%s\"}",
-                detail
+                message
         );
 
         requestContext.abortWith(
                 Response.status(Response.Status.UNAUTHORIZED)
+                        .header("WWW-Authenticate", "Bearer realm=\"" + realm + "\"")
                         .entity(errorResponse)
                         .type("application/scim+json")
                         .build()
