@@ -5,6 +5,7 @@ import com.pingidentity.p1aic.scim.config.PingIdmConfigService;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaBuilder;
 import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
+import com.pingidentity.p1aic.scim.lifecycle.SchemaManagerInitializer;
 import com.pingidentity.p1aic.scim.mapping.UserAttributeMapper;
 import com.pingidentity.p1aic.scim.schema.DynamicSchemaManager;
 import com.pingidentity.p1aic.scim.service.PingIdmUserService;
@@ -22,7 +23,12 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Main class for SCIM Server with embedded Jetty.
- * Uses Eager Initialization to ensure Schema Manager is ready before traffic starts.
+ *
+ * REFACTORED: Uses proper lifecycle management with SchemaManagerInitializer
+ * instead of manual instantiation anti-pattern.
+ *
+ * The SchemaManagerInitializer (ApplicationEventListener) ensures the DynamicSchemaManager
+ * is initialized after DI setup but before the server accepts requests.
  */
 public class ScimServerMain {
 
@@ -63,30 +69,11 @@ public class ScimServerMain {
             config.setManagedRoleObjectName(managedRoleObject);
 
             // ------------------------------------------------------------
-            // 2. Instantiate and Initialize Services (Eager Loading)
+            // 2. Services are managed by HK2 DI container
+            //    Initialization is handled by SchemaManagerInitializer lifecycle listener
             // ------------------------------------------------------------
-            PingIdmRestClient restClient = new PingIdmRestClient();
-            PingIdmConfigService configService = new PingIdmConfigService(restClient);
-            ScimSchemaBuilder schemaBuilder = new ScimSchemaBuilder();
-            DynamicSchemaManager schemaManager = new DynamicSchemaManager(configService, schemaBuilder);
-
-            logger.info("Initializing Dynamic Schema Manager (Fetching schema from PingIDM)...");
-            try {
-                schemaManager.initialize();
-            } catch (Exception e) {
-                logger.error("FATAL: Could not initialize SCIM Schema. Server cannot start.", e);
-                System.exit(1);
-            }
-
-            if (!schemaManager.isInitialized()) {
-                logger.error("FATAL: Schema manager reports not initialized after initialize() call");
-                System.exit(1);
-            }
-            logger.info("Schema manager initialization verified. Schema count: {}", schemaManager.getSchemaCount());
-
-            PingIdmUserService userService = new PingIdmUserService(restClient);
-            PingIdmRoleService roleService = new PingIdmRoleService(restClient);
-            UserAttributeMapper userMapper = new UserAttributeMapper();
+            logger.info("Services will be instantiated by HK2 dependency injection");
+            logger.info("Schema initialization will be triggered by lifecycle listener");
 
             // ------------------------------------------------------------
             // 3. Configure Jetty Server
@@ -100,7 +87,7 @@ public class ScimServerMain {
             scimContext.setContextPath("/scim/v2");
 
             // ------------------------------------------------------------
-            // 4. Configure Jersey (Bind the Eager Instances)
+            // 4. Configure Jersey with HK2 Dependency Injection
             // ------------------------------------------------------------
             ResourceConfig resourceConfig = new ResourceConfig();
 
@@ -115,27 +102,31 @@ public class ScimServerMain {
             // Register Providers
             resourceConfig.register(com.pingidentity.p1aic.scim.exceptions.ScimExceptionMapper.class);
 
-            // Bind the PRE-INITIALIZED instances to the container
+            // BEGIN: Register lifecycle listener for schema initialization
+            resourceConfig.register(SchemaManagerInitializer.class);
+            logger.info("Registered SchemaManagerInitializer lifecycle listener");
+            // END: Register lifecycle listener
+
+            // BEGIN: Bind services to HK2 DI container (let HK2 instantiate)
             resourceConfig.register(new AbstractBinder() {
                 @Override
                 protected void configure() {
-                    // Bind singleton instances
-                    bind(restClient).to(PingIdmRestClient.class);
-                    bind(userService).to(PingIdmUserService.class);
-                    bind(roleService).to(PingIdmRoleService.class);
-                    bind(userMapper).to(UserAttributeMapper.class);
-                    bind(configService).to(PingIdmConfigService.class);
-                    bind(schemaBuilder).to(ScimSchemaBuilder.class);
-                    bind(schemaManager).to(DynamicSchemaManager.class);
+                    // Bind classes - HK2 will instantiate them
+                    bind(PingIdmRestClient.class).to(PingIdmRestClient.class).in(jakarta.inject.Singleton.class);
+                    bind(PingIdmUserService.class).to(PingIdmUserService.class).in(jakarta.inject.Singleton.class);
+                    bind(PingIdmRoleService.class).to(PingIdmRoleService.class).in(jakarta.inject.Singleton.class);
+                    bind(UserAttributeMapper.class).to(UserAttributeMapper.class).in(jakarta.inject.Singleton.class);
+                    bind(PingIdmConfigService.class).to(PingIdmConfigService.class).in(jakarta.inject.Singleton.class);
+                    bind(ScimSchemaBuilder.class).to(ScimSchemaBuilder.class).in(jakarta.inject.Singleton.class);
+                    bind(DynamicSchemaManager.class).to(DynamicSchemaManager.class).in(jakarta.inject.Singleton.class);
 
-                    // BEGIN: Bind OAuthContext as request-scoped (per-request instance)
-                    // This replaces the ThreadLocal approach with proper CDI request scoping
+                    // Bind OAuthContext as request-scoped (per-request instance)
                     bindFactory(OAuthContextFactory.class)
                             .to(OAuthContext.class)
-                            .in(org.glassfish.hk2.api.PerLookup.class); // Request-scoped equivalent in HK2
-                    // END: Bind OAuthContext as request-scoped
+                            .in(org.glassfish.hk2.api.PerLookup.class);
                 }
             });
+            // END: Bind services to HK2 DI container
 
             ServletHolder jerseyServlet = new ServletHolder(new ServletContainer(resourceConfig));
             jerseyServlet.setInitOrder(0);
@@ -228,7 +219,6 @@ public class ScimServerMain {
         }
     }
 
-    // BEGIN: Add OAuthContext factory for HK2 request scoping
     /**
      * Factory for creating request-scoped OAuthContext instances.
      * HK2 uses factories to create per-request instances.
@@ -241,11 +231,9 @@ public class ScimServerMain {
 
         @Override
         public void dispose(OAuthContext instance) {
-            // Cleanup if needed - OAuthContext has a clear() method
             if (instance != null) {
                 instance.clear();
             }
         }
     }
-    // END: Add OAuthContext factory
 }
