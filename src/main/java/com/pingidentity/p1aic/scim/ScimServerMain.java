@@ -1,5 +1,6 @@
 package com.pingidentity.p1aic.scim;
 
+import com.pingidentity.p1aic.scim.auth.OAuthContext;
 import com.pingidentity.p1aic.scim.config.PingIdmConfigService;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaBuilder;
 import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
@@ -7,7 +8,7 @@ import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import com.pingidentity.p1aic.scim.mapping.UserAttributeMapper;
 import com.pingidentity.p1aic.scim.schema.DynamicSchemaManager;
 import com.pingidentity.p1aic.scim.service.PingIdmUserService;
-import com.pingidentity.p1aic.scim.service.PingIdmRoleService; // Import added
+import com.pingidentity.p1aic.scim.service.PingIdmRoleService;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
@@ -48,6 +49,7 @@ public class ScimServerMain {
             logger.info("SCIM Server Base URL: {}", scimServerBaseUrl);
             logger.info("PingIDM URL: {}", pingIdmBaseUrl);
             logger.info("OAuth Token URL: {}", oauthTokenUrl);
+
             // Initialize Singleton Config
             ScimServerConfig config = ScimServerConfig.getInstance();
             config.setScimServerBaseUrl(scimServerBaseUrl);
@@ -63,41 +65,27 @@ public class ScimServerMain {
             // ------------------------------------------------------------
             // 2. Instantiate and Initialize Services (Eager Loading)
             // ------------------------------------------------------------
-            // We manually "new" these objects to ensure they are ready before the server opens.
-            // NOTE: Ensure your classes have the matching constructors as defined in Step 1-3.
-
-            // Core Config & Schema Services
             PingIdmRestClient restClient = new PingIdmRestClient();
-
             PingIdmConfigService configService = new PingIdmConfigService(restClient);
             ScimSchemaBuilder schemaBuilder = new ScimSchemaBuilder();
-
-            // Schema Manager: Needs config + builder.
             DynamicSchemaManager schemaManager = new DynamicSchemaManager(configService, schemaBuilder);
 
             logger.info("Initializing Dynamic Schema Manager (Fetching schema from PingIDM)...");
             try {
-                // This is the FIX for the 503 Error. We force initialization now.
-                // Since we created it manually, @PostConstruct is not auto-called, so we call it here.
                 schemaManager.initialize();
             } catch (Exception e) {
                 logger.error("FATAL: Could not initialize SCIM Schema. Server cannot start.", e);
-                // Fail fast: If schema is broken, there is no point in starting the server.
                 System.exit(1);
             }
-            // BEGIN: Verify initialization
+
             if (!schemaManager.isInitialized()) {
                 logger.error("FATAL: Schema manager reports not initialized after initialize() call");
                 System.exit(1);
             }
             logger.info("Schema manager initialization verified. Schema count: {}", schemaManager.getSchemaCount());
-            // END: Verify initialization
 
-            // Client & User Services
             PingIdmUserService userService = new PingIdmUserService(restClient);
-            // Assuming you might need RoleService as well since you uploaded it
             PingIdmRoleService roleService = new PingIdmRoleService(restClient);
-
             UserAttributeMapper userMapper = new UserAttributeMapper();
 
             // ------------------------------------------------------------
@@ -116,7 +104,7 @@ public class ScimServerMain {
             // ------------------------------------------------------------
             ResourceConfig resourceConfig = new ResourceConfig();
 
-            // Register Endpoints (Keep as classes, Jersey handles these)
+            // Register Endpoints
             resourceConfig.register(com.pingidentity.p1aic.scim.auth.OAuthTokenFilter.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.endpoints.ServiceProviderConfigEndpoint.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.endpoints.SchemasEndpoint.class);
@@ -131,16 +119,21 @@ public class ScimServerMain {
             resourceConfig.register(new AbstractBinder() {
                 @Override
                 protected void configure() {
-                    // Bind the specific instances we created above
+                    // Bind singleton instances
                     bind(restClient).to(PingIdmRestClient.class);
                     bind(userService).to(PingIdmUserService.class);
-                    // bind(roleService).to(PingIdmRoleService.class); // Uncomment if used in endpoints
+                    bind(roleService).to(PingIdmRoleService.class);
                     bind(userMapper).to(UserAttributeMapper.class);
                     bind(configService).to(PingIdmConfigService.class);
                     bind(schemaBuilder).to(ScimSchemaBuilder.class);
-
-                    // Bind the initialized schema manager
                     bind(schemaManager).to(DynamicSchemaManager.class);
+
+                    // BEGIN: Bind OAuthContext as request-scoped (per-request instance)
+                    // This replaces the ThreadLocal approach with proper CDI request scoping
+                    bindFactory(OAuthContextFactory.class)
+                            .to(OAuthContext.class)
+                            .in(org.glassfish.hk2.api.PerLookup.class); // Request-scoped equivalent in HK2
+                    // END: Bind OAuthContext as request-scoped
                 }
             });
 
@@ -234,4 +227,25 @@ public class ScimServerMain {
             resp.getWriter().write("{\"status\":\"healthy\",\"service\":\"scim-server\"}");
         }
     }
+
+    // BEGIN: Add OAuthContext factory for HK2 request scoping
+    /**
+     * Factory for creating request-scoped OAuthContext instances.
+     * HK2 uses factories to create per-request instances.
+     */
+    static class OAuthContextFactory implements org.glassfish.hk2.api.Factory<OAuthContext> {
+        @Override
+        public OAuthContext provide() {
+            return new OAuthContext();
+        }
+
+        @Override
+        public void dispose(OAuthContext instance) {
+            // Cleanup if needed - OAuthContext has a clear() method
+            if (instance != null) {
+                instance.clear();
+            }
+        }
+    }
+    // END: Add OAuthContext factory
 }
