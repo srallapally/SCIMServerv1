@@ -1,6 +1,5 @@
 package com.pingidentity.p1aic.scim.client;
 
-import com.pingidentity.p1aic.scim.auth.OAuthTokenManager;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
@@ -9,14 +8,18 @@ import jakarta.ws.rs.client.Invocation;
 import jakarta.ws.rs.client.WebTarget;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.logging.Logger;
 
 /**
  * Base REST client for making authenticated calls to PingIDM REST APIs.
  *
- * This client automatically adds required PingIDM headers and uses OAuth tokens:
- * - For incoming SCIM requests: Uses the Bearer token from the request (stored in ThreadLocal)
- * - For server startup/config: Uses OAuth client credentials to obtain tokens
+ * This client automatically adds required PingIDM headers and uses the OAuth
+ * access token stored in ThreadLocal for the current request thread.
+ *
+ * The OAuth token is set by OAuthTokenFilter at the start of each request
+ * and automatically cleaned up after the request completes.
  */
 public class PingIdmRestClient {
 
@@ -33,10 +36,6 @@ public class PingIdmRestClient {
     private final Client client;
     private final ScimServerConfig config;
 
-    // BEGIN: Add OAuth token manager for server-to-server auth
-    private final OAuthTokenManager tokenManager;
-    // END: Add OAuth token manager
-
     // ThreadLocal to store OAuth token for current request thread
     private static final ThreadLocal<String> currentOAuthToken = new ThreadLocal<>();
 
@@ -46,9 +45,6 @@ public class PingIdmRestClient {
     public PingIdmRestClient() {
         this.client = ClientBuilder.newClient();
         this.config = ScimServerConfig.getInstance();
-        // BEGIN: Initialize token manager
-        this.tokenManager = new OAuthTokenManager();
-        // END: Initialize token manager
     }
 
     /**
@@ -91,7 +87,7 @@ public class PingIdmRestClient {
     }
 
     /**
-     * Build a request with standard PingIDM headers and OAuth token from ThreadLocal.
+     * Build a request with standard PingIDM headers and OAuth token.
      *
      * @param target the WebTarget to build the request from
      * @return Invocation.Builder with headers configured
@@ -114,30 +110,6 @@ public class PingIdmRestClient {
         return builder;
     }
 
-    // BEGIN: Add method for config endpoints using server OAuth token
-    /**
-     * Build a request for config/admin endpoints using server's OAuth credentials.
-     * This is used during server startup when there's no incoming request token.
-     *
-     * @param target the WebTarget to build the request from
-     * @return Invocation.Builder with headers configured
-     * @throws Exception if token acquisition fails
-     */
-    private Invocation.Builder buildRequestWithServerToken(WebTarget target) throws Exception {
-        Invocation.Builder builder = target.request(MediaType.APPLICATION_JSON);
-
-        // Add PingIDM API version header
-        builder.header(HEADER_ACCEPT_API_VERSION, API_VERSION_RESOURCE);
-
-        // Get server OAuth token via client credentials
-        String token = tokenManager.getAccessToken();
-        builder.header(HEADER_AUTHORIZATION, "Bearer " + token);
-        LOGGER.fine("Added server OAuth token to config request");
-
-        return builder;
-    }
-    // END: Add method for config endpoints
-
     /**
      * Execute GET request to PingIDM.
      *
@@ -145,24 +117,12 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response get(String endpointUrl) {
+        // Log the complete URL
+        LOGGER.info("PingIDM GET: " + endpointUrl);
+
         WebTarget target = target(endpointUrl);
         return buildRequest(target).get();
     }
-
-    // BEGIN: Add method for config endpoint GET requests
-    /**
-     * Execute GET request to PingIDM config endpoints using server OAuth credentials.
-     * Used during server startup for administrative operations.
-     *
-     * @param endpointUrl the PingIDM endpoint URL
-     * @return Response from PingIDM
-     * @throws Exception if request fails
-     */
-    public Response getConfig(String endpointUrl) throws Exception {
-        WebTarget target = target(endpointUrl);
-        return buildRequestWithServerToken(target).get();
-    }
-    // END: Add method for config endpoints
 
     /**
      * Execute GET request with query parameters.
@@ -181,6 +141,10 @@ public class PingIdmRestClient {
             }
         }
 
+        // Build the complete URL for logging
+        String completeUrl = buildCompleteUrl(endpointUrl, queryParams);
+        LOGGER.info("PingIDM GET: " + completeUrl);
+
         return buildRequest(target).get();
     }
 
@@ -192,6 +156,9 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response post(String endpointUrl, String jsonBody) {
+        LOGGER.info("PingIDM POST: " + endpointUrl);
+        LOGGER.fine("Request body: " + jsonBody);
+
         WebTarget target = target(endpointUrl);
         return buildRequest(target)
                 .post(Entity.entity(jsonBody, MediaType.APPLICATION_JSON));
@@ -206,6 +173,10 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response postWithAction(String endpointUrl, String action, String jsonBody) {
+        String completeUrl = endpointUrl + "?_action=" + action;
+        LOGGER.info("PingIDM POST: " + completeUrl);
+        LOGGER.fine("Request body: " + jsonBody);
+
         WebTarget target = target(endpointUrl).queryParam("_action", action);
         return buildRequest(target)
                 .post(Entity.entity(jsonBody, MediaType.APPLICATION_JSON));
@@ -219,6 +190,9 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response put(String endpointUrl, String jsonBody) {
+        LOGGER.info("PingIDM PUT: " + endpointUrl);
+        LOGGER.fine("Request body: " + jsonBody);
+
         WebTarget target = target(endpointUrl);
         return buildRequest(target)
                 .put(Entity.entity(jsonBody, MediaType.APPLICATION_JSON));
@@ -233,6 +207,9 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response put(String endpointUrl, String jsonBody, String revision) {
+        LOGGER.info("PingIDM PUT: " + endpointUrl + " (If-Match: " + revision + ")");
+        LOGGER.fine("Request body: " + jsonBody);
+
         WebTarget target = target(endpointUrl);
         Invocation.Builder builder = buildRequest(target);
 
@@ -252,6 +229,9 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response patch(String endpointUrl, String jsonPatch) {
+        LOGGER.info("PingIDM PATCH: " + endpointUrl);
+        LOGGER.fine("Request body: " + jsonPatch);
+
         WebTarget target = target(endpointUrl);
         return buildRequest(target)
                 .method("PATCH", Entity.entity(jsonPatch, MediaType.APPLICATION_JSON));
@@ -266,6 +246,9 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response patch(String endpointUrl, String jsonPatch, String revision) {
+        LOGGER.info("PingIDM PATCH: " + endpointUrl + " (If-Match: " + revision + ")");
+        LOGGER.fine("Request body: " + jsonPatch);
+
         WebTarget target = target(endpointUrl);
         Invocation.Builder builder = buildRequest(target);
 
@@ -284,6 +267,8 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response delete(String endpointUrl) {
+        LOGGER.info("PingIDM DELETE: " + endpointUrl);
+
         WebTarget target = target(endpointUrl);
         return buildRequest(target).delete();
     }
@@ -296,6 +281,8 @@ public class PingIdmRestClient {
      * @return Response from PingIDM
      */
     public Response delete(String endpointUrl, String revision) {
+        LOGGER.info("PingIDM DELETE: " + endpointUrl + " (If-Match: " + revision + ")");
+
         WebTarget target = target(endpointUrl);
         Invocation.Builder builder = buildRequest(target);
 
@@ -305,6 +292,50 @@ public class PingIdmRestClient {
         }
 
         return builder.delete();
+    }
+
+    /**
+     * Build complete URL string with query parameters for logging.
+     *
+     * @param baseUrl the base URL
+     * @param queryParams the query parameters as key-value pairs
+     * @return the complete URL string
+     */
+    private String buildCompleteUrl(String baseUrl, String... queryParams) {
+        if (queryParams == null || queryParams.length == 0) {
+            return baseUrl;
+        }
+
+        StringBuilder urlBuilder = new StringBuilder(baseUrl);
+        urlBuilder.append("?");
+
+        for (int i = 0; i < queryParams.length; i += 2) {
+            if (i > 0) {
+                urlBuilder.append("&");
+            }
+            if (i + 1 < queryParams.length) {
+                urlBuilder.append(queryParams[i])
+                        .append("=")
+                        .append(urlEncode(queryParams[i + 1]));
+            }
+        }
+
+        return urlBuilder.toString();
+    }
+
+    /**
+     * URL encode a string value.
+     *
+     * @param value the value to encode
+     * @return the URL-encoded value
+     */
+    private String urlEncode(String value) {
+        try {
+            return URLEncoder.encode(value, StandardCharsets.UTF_8.toString());
+        } catch (Exception e) {
+            LOGGER.warning("Failed to URL encode value: " + value);
+            return value;
+        }
     }
 
     /**
@@ -344,10 +375,5 @@ public class PingIdmRestClient {
             client.close();
             LOGGER.info("PingIDM REST client closed");
         }
-        // BEGIN: Close token manager
-        if (tokenManager != null) {
-            tokenManager.close();
-        }
-        // END: Close token manager
     }
 }

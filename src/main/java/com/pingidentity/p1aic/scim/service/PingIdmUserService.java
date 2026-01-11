@@ -314,7 +314,7 @@ public class PingIdmUserService {
     }
 
     /**
-     * Search/list users from PingIDM.
+     * Search/list users from PingIDM (backward compatible - returns all fields).
      *
      * @param queryFilter the PingIDM query filter (optional)
      * @param startIndex the 1-based start index for pagination
