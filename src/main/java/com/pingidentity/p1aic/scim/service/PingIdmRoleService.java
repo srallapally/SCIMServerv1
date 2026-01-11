@@ -332,13 +332,21 @@ public class PingIdmRoleService {
      *
      * @param queryFilter the PingIDM query filter (optional)
      * @param startIndex the 1-based start index for pagination
-     * @param count the number of results to return
+     * @param count the number of results to return (0 for count-only query)
      * @param fields the PingIDM fields to return (e.g., "*" for all, or "name,description,members")
      * @return ListResponse containing the roles as SCIM groups
      * @throws ScimException if search fails
      */
     public ListResponse<GenericScimResource> searchRoles(String queryFilter, int startIndex, int count, String fields)
             throws ScimException {
+
+        // BEGIN: count=0 optimization - use PingIDM _countOnly for performance
+        if (count == 0) {
+            LOGGER.info("Performing count-only query with filter: " + queryFilter);
+            return searchRolesCountOnly(queryFilter);
+        }
+        // END: count=0 optimization
+
         try {
             LOGGER.info("Searching roles with filter: " + queryFilter + ", fields: " + fields);
 
@@ -429,6 +437,94 @@ public class PingIdmRoleService {
             LOGGER.log(Level.SEVERE, "Error searching roles", e);
             throw new BadRequestException("Failed to search roles: " + e.getMessage());
         }
+    }
+
+    /**
+     * Perform a count-only query to PingIDM for efficiency when count=0.
+     * Uses PingIDM's _countOnly parameter to avoid fetching actual role data.
+     *
+     * @param queryFilter the PingIDM query filter (optional)
+     * @return ListResponse with totalResults populated but empty Resources array
+     * @throws ScimException if the count query fails
+     */
+    private ListResponse<GenericScimResource> searchRolesCountOnly(String queryFilter) throws ScimException {
+        try {
+            String endpoint = restClient.getManagedRolesEndpoint();
+
+            // Build query parameters for count-only query
+            List<String> queryParams = new ArrayList<>();
+
+            // Add query filter
+            queryParams.add("_queryFilter");
+            queryParams.add(queryFilter != null && !queryFilter.isEmpty() ? queryFilter : "true");
+
+            // Add _countOnly parameter for optimization
+            queryParams.add("_countOnly");
+            queryParams.add("true");
+
+            // Add total paged results policy
+            queryParams.add("_totalPagedResultsPolicy");
+            queryParams.add("EXACT");
+
+            // Log the count-only request
+            StringBuilder urlBuilder = new StringBuilder(endpoint);
+            urlBuilder.append("?");
+            for (int i = 0; i < queryParams.size(); i += 2) {
+                if (i > 0) urlBuilder.append("&");
+                urlBuilder.append(queryParams.get(i)).append("=").append(queryParams.get(i + 1));
+            }
+            LOGGER.info("PingIDM count-only URL: " + urlBuilder.toString());
+
+            // Call PingIDM count-only API
+            Response response = restClient.get(endpoint, queryParams.toArray(new String[0]));
+
+            // Read response
+            String responseBody = response.readEntity(String.class);
+            int statusCode = response.getStatus();
+
+            // Check response status
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                LOGGER.severe("PingIDM count-only query failed with status: " + statusCode + ", body: " + responseBody);
+                handleErrorResponse(statusCode, responseBody, "Failed to get role count");
+            }
+
+            // Parse response - PingIDM returns just {"totalPagedResults": N} for _countOnly
+            ObjectNode resultNode = (ObjectNode) objectMapper.readTree(responseBody);
+
+            int totalResults = extractTotalCount(resultNode, 0);
+
+            LOGGER.info("Count-only query returned: " + totalResults + " total roles");
+
+            // Return ListResponse with empty resources but correct total
+            return new ListResponse<>(
+                    totalResults,           // totalResults from PingIDM
+                    new ArrayList<>(),      // Empty resources array
+                    1,                      // startIndex = 1 (default)
+                    0                       // itemsPerPage = 0 (count=0)
+            );
+
+        } catch (ScimException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error in count-only role query", e);
+            throw new BadRequestException("Failed to get role count: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extract total count from PingIDM response, handling different field names.
+     *
+     * @param resultNode the PingIDM response JSON
+     * @param fallbackCount fallback value if no count field found
+     * @return the total count
+     */
+    private int extractTotalCount(ObjectNode resultNode, int fallbackCount) {
+        if (resultNode.has("totalPagedResults")) {
+            return resultNode.get("totalPagedResults").asInt();
+        } else if (resultNode.has("resultCount")) {
+            return resultNode.get("resultCount").asInt();
+        }
+        return fallbackCount;
     }
 
     /**

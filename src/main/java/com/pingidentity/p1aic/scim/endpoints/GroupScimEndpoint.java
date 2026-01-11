@@ -67,7 +67,18 @@ public class GroupScimEndpoint {
         try {
             // Apply default values
             int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
-            int pageSize = (count != null && count > 0) ? Math.min(count, MAX_COUNT) : DEFAULT_COUNT;
+
+            // BEGIN: count=0 optimization - RFC 7644 compliance
+            int pageSize;
+            if (count != null && count == 0) {
+                pageSize = 0;  // RFC 7644: return only totalResults
+                LOGGER.info("Count=0 requested: will return only totalResults");
+            } else if (count != null && count > 0) {
+                pageSize = Math.min(count, MAX_COUNT);
+            } else {
+                pageSize = DEFAULT_COUNT;
+            }
+            // END: count=0 optimization
 
             LOGGER.info(String.format("Searching groups: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
                     filter, start, pageSize, attributes, excludedAttributes));
