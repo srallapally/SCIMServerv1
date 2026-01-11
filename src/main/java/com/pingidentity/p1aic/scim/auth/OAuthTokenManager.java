@@ -50,13 +50,21 @@ public class OAuthTokenManager {
      * @throws Exception if token acquisition fails
      */
     public String getAccessToken() throws Exception {
+        // BEGIN: First check without lock - fast path for valid cached tokens
+        if (cachedAccessToken != null && System.currentTimeMillis() < tokenExpiresAt) {
+            logger.debug("Using cached OAuth token (lock-free read)");
+            return cachedAccessToken;
+        }
+        // END: First check without lock
+
         lock.lock();
         try {
-            // Check if cached token is still valid
+            // BEGIN: Second check with lock - prevent multiple threads from refreshing
             if (cachedAccessToken != null && System.currentTimeMillis() < tokenExpiresAt) {
-                logger.debug("Using cached OAuth token");
+                logger.debug("Using cached OAuth token (verified under lock)");
                 return cachedAccessToken;
             }
+            // END: Second check with lock
 
             // Token expired or doesn't exist, get a new one
             logger.info("Obtaining new OAuth access token via client credentials flow");
