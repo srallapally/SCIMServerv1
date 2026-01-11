@@ -117,6 +117,7 @@ public class ScimServerMain {
             ResourceConfig resourceConfig = new ResourceConfig();
 
             // Register Endpoints (Keep as classes, Jersey handles these)
+            resourceConfig.register(com.pingidentity.p1aic.scim.auth.OAuthTokenFilter.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.endpoints.ServiceProviderConfigEndpoint.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.endpoints.SchemasEndpoint.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.endpoints.ResourceTypesEndpoint.class);
