@@ -46,10 +46,10 @@ public class OAuthTokenFilter implements ContainerRequestFilter, ContainerRespon
     @Override
     public void filter(ContainerRequestContext requestContext) {
         String path = requestContext.getUriInfo().getPath();
-
+        String normalizedPath = path.startsWith("/") ? path : "/" + path;
         // Skip authentication for public endpoints
         for (String publicPath : PUBLIC_PATHS) {
-            if (path.endsWith(publicPath)) {
+            if (normalizedPath.endsWith(publicPath)) {
                 logger.debug("Skipping authentication for public endpoint: {}", path);
                 return;
             }

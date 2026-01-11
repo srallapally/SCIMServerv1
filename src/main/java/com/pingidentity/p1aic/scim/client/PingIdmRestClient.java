@@ -56,6 +56,7 @@ public class PingIdmRestClient {
     /**
      * Constructor initializes JAX-RS client.
      */
+    @Inject
     public PingIdmRestClient() {
         // BEGIN: Configure HTTP client with timeouts and connection pooling
         ClientConfig clientConfig = new ClientConfig();

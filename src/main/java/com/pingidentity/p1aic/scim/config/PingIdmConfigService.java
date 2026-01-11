@@ -27,6 +27,7 @@ public class PingIdmConfigService {
     /**
      * Constructor initializes the ObjectMapper.
      */
+    @Inject
     public PingIdmConfigService(PingIdmRestClient restClient) {
         this.restClient = restClient;
         this.objectMapper = new ObjectMapper();
