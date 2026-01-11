@@ -19,11 +19,15 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * OPTIMIZED: Service class for PingIDM managed user operations.
+ * Service class for PingIDM managed user operations.
+ *
+ * This service uses PingIdmRestClient to interact with PingIDM REST APIs
+ * and UserAttributeMapper to convert between SCIM User and PingIDM user formats.
  *
  * Enhancements:
  * - Uses _countOnly=true for count=0 requests (RFC 7644 compliance)
  * - Supports efficient total count retrieval without fetching resources
+ * - Supports field selection for optimized data retrieval
  */
 public class PingIdmUserService {
 
@@ -35,16 +39,288 @@ public class PingIdmUserService {
     private final UserAttributeMapper attributeMapper;
     private final ObjectMapper objectMapper;
 
+    /**
+     * Default constructor.
+     */
     public PingIdmUserService() {
         this.attributeMapper = new UserAttributeMapper();
         this.objectMapper = new ObjectMapper();
     }
 
+    /**
+     * Constructor with dependency injection.
+     *
+     * @param restClient the PingIDM REST client
+     */
     @Inject
     public PingIdmUserService(PingIdmRestClient restClient) {
         this.restClient = restClient;
         this.attributeMapper = new UserAttributeMapper();
         this.objectMapper = new ObjectMapper();
+    }
+
+    /**
+     * Create a new user in PingIDM.
+     *
+     * @param scimUser the SCIM user resource to create
+     * @return the created user as SCIM resource
+     * @throws ScimException if creation fails
+     */
+    public GenericScimResource createUser(GenericScimResource scimUser) throws ScimException {
+        try {
+            // Convert SCIM user to PingIDM format
+            ObjectNode idmUser = attributeMapper.scimToPingIdm(scimUser);
+
+            // Convert to JSON string
+            String jsonBody = objectMapper.writeValueAsString(idmUser);
+
+            LOGGER.info("Creating user in PingIDM");
+
+            // Call PingIDM create API
+            String endpoint = restClient.getManagedUsersEndpoint();
+            Response response = restClient.postWithAction(endpoint, "create", jsonBody);
+
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
+            // Check response status
+            if (statusCode != Response.Status.CREATED.getStatusCode() &&
+                    statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to create user");
+            }
+
+            // Parse response body
+            ObjectNode createdUser = (ObjectNode) objectMapper.readTree(responseBody);
+
+            // Convert back to SCIM format
+            return attributeMapper.pingIdmToScim(createdUser);
+
+        } catch (ScimException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error creating user", e);
+            throw new BadRequestException("Failed to create user: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Get a user by ID from PingIDM.
+     *
+     * @param userId the user ID
+     * @return the user as SCIM resource
+     * @throws ScimException if user not found or retrieval fails
+     */
+    public GenericScimResource getUser(String userId) throws ScimException {
+        return getUser(userId, "*");
+    }
+
+    /**
+     * Get a user by ID from PingIDM with field selection.
+     *
+     * @param userId the user ID
+     * @param fields the PingIDM fields to return (e.g., "*" for all, or "userName,mail,_id,_rev")
+     * @return the user as SCIM resource
+     * @throws ScimException if user not found or retrieval fails
+     */
+    public GenericScimResource getUser(String userId, String fields) throws ScimException {
+        try {
+            LOGGER.info("Getting user: " + userId + ", fields: " + fields);
+
+            // Build endpoint URL
+            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+
+            // Add fields parameter if specified
+            Response response;
+            if (fields != null && !fields.equals("*")) {
+                response = restClient.get(endpoint, "_fields", fields);
+            } else {
+                response = restClient.get(endpoint);
+            }
+
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
+            // Check if user exists
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
+                throw new ResourceNotFoundException("User not found: " + userId);
+            }
+
+            // Check response status
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to get user");
+            }
+
+            // Parse response body
+            ObjectNode idmUser = (ObjectNode) objectMapper.readTree(responseBody);
+
+            // Convert to SCIM format
+            return attributeMapper.pingIdmToScim(idmUser);
+
+        } catch (ScimException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error getting user", e);
+            throw new BadRequestException("Failed to get user: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Update a user in PingIDM (full replace).
+     *
+     * @param userId the user ID to update
+     * @param scimUser the updated SCIM user resource
+     * @param revision the revision/etag for optimistic locking (optional)
+     * @return the updated user as SCIM resource
+     * @throws ScimException if update fails
+     */
+    public GenericScimResource updateUser(String userId, GenericScimResource scimUser, String revision)
+            throws ScimException {
+        try {
+            // Convert SCIM user to PingIDM format
+            ObjectNode idmUser = attributeMapper.scimToPingIdm(scimUser);
+
+            // Convert to JSON string
+            String jsonBody = objectMapper.writeValueAsString(idmUser);
+
+            LOGGER.info("Updating user: " + userId);
+
+            // Build endpoint URL
+            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+
+            // Call PingIDM update API
+            Response response;
+            if (revision != null && !revision.isEmpty()) {
+                response = restClient.put(endpoint, jsonBody, revision);
+            } else {
+                response = restClient.put(endpoint, jsonBody);
+            }
+
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
+            // Check if user exists
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
+                throw new ResourceNotFoundException("User not found: " + userId);
+            }
+
+            // Check response status
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to update user");
+            }
+
+            // Parse response body
+            ObjectNode updatedUser = (ObjectNode) objectMapper.readTree(responseBody);
+
+            // Convert back to SCIM format
+            return attributeMapper.pingIdmToScim(updatedUser);
+
+        } catch (ScimException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error updating user", e);
+            throw new BadRequestException("Failed to update user: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Patch a user in PingIDM (partial update).
+     *
+     * @param userId the user ID to patch
+     * @param patchOperations the SCIM patch operations (as JSON string)
+     * @param revision the revision/etag for optimistic locking (optional)
+     * @return the patched user as SCIM resource
+     * @throws ScimException if patch fails
+     */
+    public GenericScimResource patchUser(String userId, String patchOperations, String revision)
+            throws ScimException {
+        try {
+            LOGGER.info("Patching user: " + userId);
+
+            // Build endpoint URL
+            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+
+            // Call PingIDM patch API
+            Response response;
+            if (revision != null && !revision.isEmpty()) {
+                response = restClient.patch(endpoint, patchOperations, revision);
+            } else {
+                response = restClient.patch(endpoint, patchOperations);
+            }
+
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
+            // Check if user exists
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
+                throw new ResourceNotFoundException("User not found: " + userId);
+            }
+
+            // Check response status
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to patch user");
+            }
+
+            // Parse response body
+            ObjectNode patchedUser = (ObjectNode) objectMapper.readTree(responseBody);
+
+            // Convert back to SCIM format
+            return attributeMapper.pingIdmToScim(patchedUser);
+
+        } catch (ScimException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error patching user", e);
+            throw new BadRequestException("Failed to patch user: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Delete a user from PingIDM.
+     *
+     * @param userId the user ID to delete
+     * @param revision the revision/etag for optimistic locking (optional)
+     * @throws ScimException if deletion fails
+     */
+    public void deleteUser(String userId, String revision) throws ScimException {
+        try {
+            LOGGER.info("Deleting user: " + userId);
+
+            // Build endpoint URL
+            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+
+            // Call PingIDM delete API
+            Response response;
+            if (revision != null && !revision.isEmpty()) {
+                response = restClient.delete(endpoint, revision);
+            } else {
+                response = restClient.delete(endpoint);
+            }
+
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
+            // Check if user exists
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
+                throw new ResourceNotFoundException("User not found: " + userId);
+            }
+
+            // Check response status
+            if (statusCode != Response.Status.OK.getStatusCode() &&
+                    statusCode != Response.Status.NO_CONTENT.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to delete user");
+            }
+
+        } catch (ScimException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error deleting user", e);
+            throw new BadRequestException("Failed to delete user: " + e.getMessage());
+        }
     }
 
     /**
@@ -152,8 +428,20 @@ public class PingIdmUserService {
     }
 
     /**
-     * BEGIN: NEW METHOD - Efficient count-only query
+     * Search/list users from PingIDM (backward compatible - returns all fields).
      *
+     * @param queryFilter the PingIDM query filter (optional)
+     * @param startIndex the 1-based start index for pagination
+     * @param count the number of results to return
+     * @return ListResponse containing the users
+     * @throws ScimException if search fails
+     */
+    public ListResponse<GenericScimResource> searchUsers(String queryFilter, int startIndex, int count)
+            throws ScimException {
+        return searchUsers(queryFilter, startIndex, count, "*");
+    }
+
+    /**
      * Perform a count-only query using PingIDM's _countOnly parameter.
      * This is much more efficient than fetching all resources when only the count is needed.
      *
@@ -214,12 +502,7 @@ public class PingIdmUserService {
 
             // Extract count from PingIDM response
             // With _countOnly=true, PingIDM returns: {"totalPagedResults": X}
-            int totalResults = 0;
-            if (resultNode.has("totalPagedResults")) {
-                totalResults = resultNode.get("totalPagedResults").asInt();
-            } else if (resultNode.has("resultCount")) {
-                totalResults = resultNode.get("resultCount").asInt();
-            }
+            int totalResults = extractTotalCount(resultNode, 0);
 
             LOGGER.info("Count-only query returned: " + totalResults + " total users");
 
@@ -238,10 +521,9 @@ public class PingIdmUserService {
             throw new BadRequestException("Failed to count users: " + e.getMessage());
         }
     }
-    // END: NEW METHOD
 
     /**
-     * BEGIN: HELPER METHOD - Extract total count from PingIDM response
+     * Extract total count from PingIDM response.
      *
      * @param resultNode the PingIDM response JSON
      * @param fallbackCount fallback count if not found in response
@@ -255,35 +537,33 @@ public class PingIdmUserService {
         }
         return fallbackCount;
     }
-    // END: HELPER METHOD
-
-    /**
-     * Search/list users from PingIDM (backward compatible - returns all fields).
-     */
-    public ListResponse<GenericScimResource> searchUsers(String queryFilter, int startIndex, int count)
-            throws ScimException {
-        return searchUsers(queryFilter, startIndex, count, "*");
-    }
-
-    // ... rest of the methods (getUser, createUser, updateUser, etc.) remain unchanged ...
 
     /**
      * Handle error responses from PingIDM.
+     * Updated to accept status code and response body separately.
+     *
+     * @param statusCode the HTTP status code
+     * @param responseBody the response body as string
+     * @param defaultMessage the default error message
+     * @throws ScimException mapped from PingIDM error
      */
     private void handleErrorResponse(int statusCode, String responseBody, String defaultMessage) throws ScimException {
         String errorMessage = defaultMessage;
 
         try {
-            JsonNode errorNode = objectMapper.readTree(responseBody);
-            if (errorNode.has("message")) {
-                errorMessage = errorNode.get("message").asText();
-            } else if (errorNode.has("detail")) {
-                errorMessage = errorNode.get("detail").asText();
+            if (responseBody != null && !responseBody.isEmpty()) {
+                JsonNode errorNode = objectMapper.readTree(responseBody);
+                if (errorNode.has("message")) {
+                    errorMessage = errorNode.get("message").asText();
+                } else if (errorNode.has("detail")) {
+                    errorMessage = errorNode.get("detail").asText();
+                }
             }
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to parse error response", e);
         }
 
+        // Map HTTP status to appropriate SCIM exception
         if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
             throw new ResourceNotFoundException(errorMessage);
         } else if (statusCode == Response.Status.CONFLICT.getStatusCode()) {
