@@ -1,7 +1,7 @@
 package com.pingidentity.p1aic.scim.auth;
 
-import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.container.ContainerResponseContext;
@@ -18,17 +18,23 @@ import org.slf4j.LoggerFactory;
  * This filter:
  * 1. Extracts the Bearer token from the Authorization header
  * 2. Validates that the token is present and properly formatted
- * 3. Stores the token in ThreadLocal for PingIdmRestClient to use
- * 4. Cleans up the ThreadLocal after the request completes
+ * 3. Stores the token in request-scoped OAuthContext for PingIdmRestClient to use
+ * 4. OAuthContext is automatically cleaned up when request scope ends
  *
  * Certain endpoints (ServiceProviderConfig, Schemas, ResourceTypes) are
  * exempt from authentication as per SCIM 2.0 specification.
+ *
  */
 @Provider
 @PreMatching
 public class OAuthTokenFilter implements ContainerRequestFilter, ContainerResponseFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(OAuthTokenFilter.class);
+
+    // BEGIN: Inject request-scoped OAuthContext instead of using ThreadLocal
+    @Inject
+    private OAuthContext oauthContext;
+    // END: Inject request-scoped OAuthContext
 
     // SCIM endpoints that don't require authentication
     private static final String[] PUBLIC_PATHS = {
@@ -74,17 +80,19 @@ public class OAuthTokenFilter implements ContainerRequestFilter, ContainerRespon
             return;
         }
 
-        // Store token in ThreadLocal for PingIdmRestClient to use
-        PingIdmRestClient.setCurrentOAuthToken(token);
-        logger.debug("OAuth token extracted and stored for request to: {}", path);
+        // BEGIN: Store token in request-scoped OAuthContext instead of ThreadLocal
+        oauthContext.setAccessToken(token);
+        logger.debug("OAuth token extracted and stored in OAuthContext for request to: {}", path);
+        // END: Store token in request-scoped OAuthContext
     }
 
     @Override
     public void filter(ContainerRequestContext requestContext,
                        ContainerResponseContext responseContext) {
-        // Clean up ThreadLocal after request completes (success or failure)
-        PingIdmRestClient.clearCurrentOAuthToken();
-        logger.debug("OAuth token cleared after request completion");
+        // BEGIN: Request-scoped bean automatically cleaned up - no manual cleanup needed
+        // The CDI container will destroy the OAuthContext bean when request scope ends
+        logger.debug("Request completed - OAuthContext will be automatically cleaned up by CDI container");
+        // END: Request-scoped bean automatically cleaned up
     }
 
     /**
