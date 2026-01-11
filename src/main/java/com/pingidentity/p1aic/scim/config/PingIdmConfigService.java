@@ -27,7 +27,8 @@ public class PingIdmConfigService {
     /**
      * Constructor initializes the ObjectMapper.
      */
-    public PingIdmConfigService() {
+    public PingIdmConfigService(PingIdmRestClient restClient) {
+        this.restClient = restClient;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -46,6 +47,7 @@ public class PingIdmConfigService {
 
             // Get config endpoint URL
             String endpoint = restClient.getConfigManagedEndpoint();
+            LOGGER.info("Config endpoint URL: "+ endpoint);
 
             // BEGIN: Use getConfig for OAuth client credentials authentication
             // Call PingIDM config API (uses server OAuth token)
@@ -118,25 +120,23 @@ public class PingIdmConfigService {
     /**
      * Get the user object configuration.
      *
-     * @param realm the realm name (e.g., "alpha")
+     * @param objectName the object name (e.g., "alpha_user")
      * @return ObjectNode containing the user object configuration
      * @throws Exception if configuration retrieval fails
      */
-    public ObjectNode getUserConfig(String realm) throws Exception {
-        String objectType = realm + "_user";
-        return getManagedObjectConfig(objectType);
+    public ObjectNode getUserConfig(String objectName) throws Exception {
+        return getManagedObjectConfig(objectName);
     }
 
     /**
      * Get the role object configuration.
      *
-     * @param realm the realm name (e.g., "alpha")
+     * @param objectName the managed object name (e.g., "alpha_role")
      * @return ObjectNode containing the role object configuration
      * @throws Exception if configuration retrieval fails
      */
-    public ObjectNode getRoleConfig(String realm) throws Exception {
-        String objectType = realm + "_role";
-        return getManagedObjectConfig(objectType);
+    public ObjectNode getRoleConfig(String objectName) throws Exception {
+        return getManagedObjectConfig(objectName);
     }
 
     /**

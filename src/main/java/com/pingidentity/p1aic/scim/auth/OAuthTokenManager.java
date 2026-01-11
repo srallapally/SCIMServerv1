@@ -88,7 +88,7 @@ public class OAuthTokenManager {
         if (clientSecret == null || clientSecret.isEmpty()) {
             throw new IllegalStateException("OAUTH_CLIENT_SECRET not configured");
         }
-
+        logger.debug("Obtaining OAuth access token via client credentials flow");
         try {
             // Build form data for token request
             Form form = new Form();
@@ -124,7 +124,7 @@ public class OAuthTokenManager {
             }
 
             cachedAccessToken = tokenResponse.get("access_token").asText();
-
+            logger.info("Cached OAuth access token: {}", cachedAccessToken);
             // Calculate token expiration time
             long expiresIn = tokenResponse.has("expires_in")
                     ? tokenResponse.get("expires_in").asLong()

@@ -45,7 +45,8 @@ public class SchemasEndpoint {
     public Response getAllSchemas(
             @QueryParam("startIndex") Integer startIndex,
             @QueryParam("count") Integer count) {
-
+        LOGGER.info("SchemaManager instance hashcode: " + System.identityHashCode(schemaManager));
+        LOGGER.info("SchemaManager initialized: "+ schemaManager.isInitialized());
         try {
             LOGGER.info("Getting all schemas");
 

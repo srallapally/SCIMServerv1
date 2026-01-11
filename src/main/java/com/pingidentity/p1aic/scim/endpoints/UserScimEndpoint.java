@@ -18,6 +18,8 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -45,36 +47,41 @@ public class UserScimEndpoint {
     /**
      * Search/List users.
      *
-     * GET /Users?filter={filter}&startIndex={startIndex}&count={count}
+     * GET /Users?filter={filter}&startIndex={startIndex}&count={count}&attributes={attributes}
      *
      * @param filter SCIM filter expression (optional)
      * @param startIndex 1-based start index for pagination (default: 1)
      * @param count number of results to return (default: 100, max: 1000)
+     * @param attributes comma-separated list of attributes to return (optional)
+     * @param excludedAttributes comma-separated list of attributes to exclude (optional)
      * @return ListResponse containing users
      */
     @GET
     public Response searchUsers(
             @QueryParam("filter") String filter,
             @QueryParam("startIndex") Integer startIndex,
-            @QueryParam("count") Integer count) {
+            @QueryParam("count") Integer count,
+            @QueryParam("attributes") String attributes,
+            @QueryParam("excludedAttributes") String excludedAttributes) {
 
         try {
             // Apply default values
             int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
             int pageSize = (count != null && count > 0) ? Math.min(count, MAX_COUNT) : DEFAULT_COUNT;
 
-            LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d",
-                    filter, start, pageSize));
+            LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
+                    filter, start, pageSize, attributes, excludedAttributes));
 
             // TODO: Convert SCIM filter to PingIDM query filter
-            // For now, pass filter as-is (will be implemented in Phase 4)
             String queryFilter = filter;
+
+            // Convert SCIM attributes to PingIDM fields
+            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
 
             // Call service to search users
             ListResponse<GenericScimResource> listResponse =
-                    userService.searchUsers(queryFilter, start, pageSize);
+                    userService.searchUsers(queryFilter, start, pageSize, idmFields);
 
-            // Return 200 OK with ListResponse
             return Response.ok(listResponse).build();
 
         } catch (ScimException e) {
@@ -90,20 +97,28 @@ public class UserScimEndpoint {
     /**
      * Get a user by ID.
      *
-     * GET /Users/{id}
+     * GET /Users/{id}?attributes={attributes}
      *
      * @param id the user ID
+     * @param attributes comma-separated list of attributes to return (optional)
+     * @param excludedAttributes comma-separated list of attributes to exclude (optional)
      * @return the user resource
      */
     @GET
     @Path("/{id}")
-    public Response getUser(@PathParam("id") String id) {
+    public Response getUser(
+            @PathParam("id") String id,
+            @QueryParam("attributes") String attributes,
+            @QueryParam("excludedAttributes") String excludedAttributes) {
 
         try {
             LOGGER.info("Getting user: " + id);
 
+            // Convert SCIM attributes to PingIDM fields
+            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
+
             // Call service to get user
-            GenericScimResource user = userService.getUser(id);
+            GenericScimResource user = userService.getUser(id, idmFields);
 
             // Return 200 OK with user resource
             return Response.ok(user).build();
@@ -271,6 +286,126 @@ public class UserScimEndpoint {
             return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
                     "Internal server error: " + e.getMessage());
         }
+    }
+
+    /**
+     * Convert SCIM attributes parameter to PingIDM _fields parameter.
+     *
+     * @param attributes comma-separated SCIM attributes to include
+     * @param excludedAttributes comma-separated SCIM attributes to exclude
+     * @return PingIDM _fields parameter value, or "*" for all fields
+     */
+    private String convertScimAttributesToIdmFields(String attributes, String excludedAttributes) {
+        // If both are null/empty, return all fields
+        if ((attributes == null || attributes.trim().isEmpty()) &&
+                (excludedAttributes == null || excludedAttributes.trim().isEmpty())) {
+            return "*";
+        }
+
+        // Cannot specify both attributes and excludedAttributes
+        if (attributes != null && !attributes.trim().isEmpty() &&
+                excludedAttributes != null && !excludedAttributes.trim().isEmpty()) {
+            throw new IllegalArgumentException("Cannot specify both 'attributes' and 'excludedAttributes'");
+        }
+
+        // Handle attributes (include list)
+        if (attributes != null && !attributes.trim().isEmpty()) {
+            String[] scimAttrs = attributes.split(",");
+            List<String> idmFields = new ArrayList<>();
+
+            // Always include id and meta fields
+            idmFields.add("_id");
+            idmFields.add("_rev");
+
+            for (String scimAttr : scimAttrs) {
+                String trimmed = scimAttr.trim();
+
+                // Map SCIM attributes to PingIDM fields
+                switch (trimmed) {
+                    case "id":
+                        // Already added
+                        break;
+                    case "userName":
+                        idmFields.add("userName");
+                        break;
+                    case "name":
+                        // Include all name sub-attributes
+                        idmFields.add("givenName");
+                        idmFields.add("sn");
+                        idmFields.add("cn");
+                        idmFields.add("middleName");
+                        idmFields.add("honorificPrefix");
+                        idmFields.add("honorificSuffix");
+                        break;
+                    case "name.givenName":
+                        idmFields.add("givenName");
+                        break;
+                    case "name.familyName":
+                        idmFields.add("sn");
+                        break;
+                    case "name.formatted":
+                        idmFields.add("cn");
+                        break;
+                    case "name.middleName":
+                        idmFields.add("middleName");
+                        break;
+                    case "name.honorificPrefix":
+                        idmFields.add("honorificPrefix");
+                        break;
+                    case "name.honorificSuffix":
+                        idmFields.add("honorificSuffix");
+                        break;
+                    case "displayName":
+                        idmFields.add("displayName");
+                        break;
+                    case "emails":
+                    case "emails.value":
+                        idmFields.add("mail");
+                        break;
+                    case "phoneNumbers":
+                    case "phoneNumbers.value":
+                        idmFields.add("telephoneNumber");
+                        break;
+                    case "active":
+                        idmFields.add("accountStatus");
+                        break;
+                    case "title":
+                        idmFields.add("title");
+                        break;
+                    case "preferredLanguage":
+                        idmFields.add("preferredLanguage");
+                        break;
+                    case "locale":
+                        idmFields.add("locale");
+                        break;
+                    case "timezone":
+                        idmFields.add("timezone");
+                        break;
+                    case "profileUrl":
+                        idmFields.add("profileUrl");
+                        break;
+                    case "meta":
+                        // Already have _rev, timestamps are in _meta if available
+                        break;
+                    default:
+                        // Pass through custom attributes as-is
+                        idmFields.add(trimmed);
+                        break;
+                }
+            }
+
+            return String.join(",", idmFields);
+        }
+
+        // Handle excludedAttributes - not directly supported by PingIDM _fields
+        // Would need to fetch all fields and filter in application layer
+        // For now, return all fields and let the application filter
+        if (excludedAttributes != null && !excludedAttributes.trim().isEmpty()) {
+            LOGGER.warning("excludedAttributes not fully supported - fetching all fields and will filter in application");
+            return "*";
+        }
+
+        return "*";
     }
 
     /**

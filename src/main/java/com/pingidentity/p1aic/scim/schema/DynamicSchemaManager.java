@@ -1,4 +1,5 @@
 package com.pingidentity.p1aic.scim.schema;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pingidentity.p1aic.scim.config.PingIdmConfigService;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
@@ -38,7 +39,7 @@ public class DynamicSchemaManager {
 
     private final ScimServerConfig config;
     private final ReadWriteLock lock;
-
+    private final ObjectMapper objectMapper;
     // Cache for SCIM schemas
     private final Map<String, GenericScimResource> schemaCache;
 
@@ -56,6 +57,7 @@ public class DynamicSchemaManager {
         this.lock = new ReentrantReadWriteLock();
         this.schemaCache = new HashMap<>();
         this.attributeCache = new HashMap<>();
+        this.objectMapper = new ObjectMapper();
     }
 
     @Inject
@@ -68,6 +70,7 @@ public class DynamicSchemaManager {
         this.lock = new ReentrantReadWriteLock();
         this.schemaCache = new HashMap<>();
         this.attributeCache = new HashMap<>();
+        this.objectMapper = new ObjectMapper();
     }
     /**
      * Initialize schemas on startup.
@@ -83,10 +86,13 @@ public class DynamicSchemaManager {
 
             initialized = true;
             LOGGER.info("DynamicSchemaManager initialized successfully");
+            LOGGER.info("Schema count: "+ schemaCache.size());
+            LOGGER.info("Cached schemas: "+ String.join(", ", schemaCache.keySet()));
+            LOGGER.info("DynamicSchemaManager initialized successfully");
 
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to initialize DynamicSchemaManager", e);
-            // Don't throw exception - allow server to start but schemas won't be available
+            throw new RuntimeException("Failed to initialize DynamicSchemaManager", e);
         }
     }
 
@@ -98,14 +104,23 @@ public class DynamicSchemaManager {
         try {
             String realm = config.getRealm();
 
+            LOGGER.info("Building schemas. Realm: " + realm);
+
             // Build User schema
+            LOGGER.info("About to build user schema...");
             buildUserSchema(realm);
+            LOGGER.info("User schema build completed");
 
             // Build Group schema
+            LOGGER.info("About to build group schema...");
             buildGroupSchema(realm);
+            LOGGER.info("Group schema build completed");
 
             LOGGER.info("Successfully built SCIM schemas for realm: " + realm);
 
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error in buildSchemas()", e);
+            throw e;
         } finally {
             lock.writeLock().unlock();
         }
@@ -118,11 +133,17 @@ public class DynamicSchemaManager {
         LOGGER.info("Building User schema for realm: " + realm);
 
         // Fetch PingIDM user configuration
-        ObjectNode userConfig = configService.getUserConfig(realm);
+        String userObjectName = config.getManagedUserObjectName();
+        LOGGER.info("User object name: " + userObjectName);
+        if (configService == null) {
+            throw new IllegalStateException("ConfigService is null!");
+        }
+        ObjectNode userConfig = configService.getManagedObjectConfig(userObjectName);
 
         if (userConfig == null) {
             LOGGER.warning("User configuration not found for realm: " + realm);
-            return;
+            throw new Exception("User configuration not found for object: " + userObjectName);
+            //return;
         }
 
         // Extract properties definition
@@ -130,9 +151,10 @@ public class DynamicSchemaManager {
 
         if (properties == null) {
             LOGGER.warning("Properties definition not found in user configuration");
-            return;
+            properties = objectMapper.createObjectNode();
+            LOGGER.info("Using empty properties for user schema");
         }
-
+        LOGGER.info("Building SCIM User schema with " + properties.size() + " custom properties");
         // Build SCIM User schema
         GenericScimResource userSchema = schemaBuilder.buildUserSchema(properties);
 
@@ -153,11 +175,13 @@ public class DynamicSchemaManager {
         LOGGER.info("Building Group schema for realm: " + realm);
 
         // Fetch PingIDM role configuration
-        ObjectNode roleConfig = configService.getRoleConfig(realm);
+        String roleObjectName = config.getManagedRoleObjectName();
+        LOGGER.info("Role object name: " + roleObjectName);
+        ObjectNode roleConfig = configService.getManagedObjectConfig(roleObjectName);
 
         if (roleConfig == null) {
             LOGGER.warning("Role configuration not found for realm: " + realm);
-            return;
+            throw new Exception("Role configuration not found for object: " + roleObjectName);
         }
 
         // Extract properties definition
@@ -165,7 +189,8 @@ public class DynamicSchemaManager {
 
         if (properties == null) {
             LOGGER.warning("Properties definition not found in role configuration");
-            return;
+            properties = objectMapper.createObjectNode();
+            LOGGER.info("Using empty properties for group schema");
         }
 
         // Build SCIM Group schema
@@ -290,6 +315,8 @@ public class DynamicSchemaManager {
      * @return true if initialized, false otherwise
      */
     public boolean isInitialized() {
+        LOGGER.info("isInitialized() called. Instance hashcode: "+System.identityHashCode(this) +
+                " initialized: " + initialized);
         return initialized;
     }
 

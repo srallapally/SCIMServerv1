@@ -47,7 +47,7 @@ public class ScimServerMain {
             logger.info("Port: {}", port);
             logger.info("SCIM Server Base URL: {}", scimServerBaseUrl);
             logger.info("PingIDM URL: {}", pingIdmBaseUrl);
-
+            logger.info("OAuth Token URL: {}", oauthTokenUrl);
             // Initialize Singleton Config
             ScimServerConfig config = ScimServerConfig.getInstance();
             config.setScimServerBaseUrl(scimServerBaseUrl);
@@ -67,7 +67,9 @@ public class ScimServerMain {
             // NOTE: Ensure your classes have the matching constructors as defined in Step 1-3.
 
             // Core Config & Schema Services
-            PingIdmConfigService configService = new PingIdmConfigService();
+            PingIdmRestClient restClient = new PingIdmRestClient();
+
+            PingIdmConfigService configService = new PingIdmConfigService(restClient);
             ScimSchemaBuilder schemaBuilder = new ScimSchemaBuilder();
 
             // Schema Manager: Needs config + builder.
@@ -83,9 +85,15 @@ public class ScimServerMain {
                 // Fail fast: If schema is broken, there is no point in starting the server.
                 System.exit(1);
             }
+            // BEGIN: Verify initialization
+            if (!schemaManager.isInitialized()) {
+                logger.error("FATAL: Schema manager reports not initialized after initialize() call");
+                System.exit(1);
+            }
+            logger.info("Schema manager initialization verified. Schema count: {}", schemaManager.getSchemaCount());
+            // END: Verify initialization
 
             // Client & User Services
-            PingIdmRestClient restClient = new PingIdmRestClient();
             PingIdmUserService userService = new PingIdmUserService(restClient);
             // Assuming you might need RoleService as well since you uploaded it
             PingIdmRoleService roleService = new PingIdmRoleService(restClient);
