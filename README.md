@@ -1,6 +1,6 @@
 # SCIM 2.0 Server for PingIDM
 
-A Java-based SCIM 2.0 (System for Cross-domain Identity Management) server that acts as a gateway/proxy for PingIDM. It translates SCIM 2.0 requests into PingIDM-compatible calls, providing a standard interface for identity management.
+A Java-based SCIM 2.0 (System for Cross-domain Identity Management) server that acts as a gateway/proxy for PingOne Advanced Identity Cloud. It translates SCIM 2.0 requests into PingIDM-compatible calls, providing a standard interface for identity management.
 
 ## Features
 
