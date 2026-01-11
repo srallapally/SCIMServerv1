@@ -1,7 +1,9 @@
 package com.pingidentity.p1aic.scim.client;
 
+import com.pingidentity.p1aic.scim.auth.OAuthContext;
 import com.pingidentity.p1aic.scim.auth.OAuthTokenManager;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.Entity;
@@ -17,10 +19,13 @@ import java.util.logging.Logger;
  * Base REST client for making authenticated calls to PingIDM REST APIs.
  *
  * This client automatically adds required PingIDM headers and uses the OAuth
- * access token stored in ThreadLocal for the current request thread.
+ * access token stored in request-scoped OAuthContext for the current request.
+ *
+ * REFACTORED: Now uses @RequestScoped OAuthContext injection instead of ThreadLocal
+ * for better compatibility with async/reactive processing models.
  *
  * The OAuth token is set by OAuthTokenFilter at the start of each request
- * and automatically cleaned up after the request completes.
+ * and automatically cleaned up when the request scope ends.
  */
 public class PingIdmRestClient {
 
@@ -37,10 +42,13 @@ public class PingIdmRestClient {
     private final Client client;
     private final ScimServerConfig config;
 
-    // ThreadLocal to store OAuth token for current request thread
-    private static final ThreadLocal<String> currentOAuthToken = new ThreadLocal<>();
+    // BEGIN: Inject request-scoped OAuthContext instead of using ThreadLocal
+    @Inject
+    private OAuthContext oauthContext;
+    // END: Inject request-scoped OAuthContext
 
     private final OAuthTokenManager tokenManager;
+
     /**
      * Constructor initializes JAX-RS client.
      */
@@ -50,33 +58,27 @@ public class PingIdmRestClient {
         this.tokenManager = new OAuthTokenManager();
     }
 
+    // BEGIN: Remove static ThreadLocal methods - no longer needed
     /**
-     * Set the OAuth token for the current request thread.
-     * This should be called by OAuthTokenFilter at the start of each request.
+     * REMOVED: setCurrentOAuthToken(String token)
+     * REMOVED: clearCurrentOAuthToken()
      *
-     * @param token the OAuth Bearer token
+     * These static ThreadLocal methods have been removed.
+     * Token is now managed by request-scoped OAuthContext bean.
      */
-    public static void setCurrentOAuthToken(String token) {
-        currentOAuthToken.set(token);
-        LOGGER.fine("OAuth token set for current thread");
-    }
+    // END: Remove static ThreadLocal methods
 
     /**
-     * Clear the OAuth token after request completes.
-     * This should be called by OAuthTokenFilter in the response filter.
-     */
-    public static void clearCurrentOAuthToken() {
-        currentOAuthToken.remove();
-        LOGGER.fine("OAuth token cleared for current thread");
-    }
-
-    /**
-     * Get the OAuth token for the current request thread.
-     *
+     * Get the OAuth token for the current request.
      * @return the OAuth token, or null if not set
      */
     private String getCurrentOAuthToken() {
-        return currentOAuthToken.get();
+        // BEGIN: Use injected OAuthContext instead of ThreadLocal
+        if (oauthContext != null && oauthContext.hasAccessToken()) {
+            return oauthContext.getAccessToken();
+        }
+        return null;
+        // END: Use injected OAuthContext
     }
 
     /**
@@ -101,14 +103,15 @@ public class PingIdmRestClient {
         // Add PingIDM API version header
         builder.header(HEADER_ACCEPT_API_VERSION, API_VERSION_RESOURCE);
 
-        // Add OAuth Bearer token from ThreadLocal
+        // BEGIN: Add OAuth Bearer token from request-scoped OAuthContext
         String token = getCurrentOAuthToken();
         if (token != null && !token.isEmpty()) {
             builder.header(HEADER_AUTHORIZATION, "Bearer " + token);
-            LOGGER.fine("Added OAuth Bearer token to request");
+            LOGGER.fine("Added OAuth Bearer token from OAuthContext to request");
         } else {
-            LOGGER.warning("No OAuth access token available for PingIDM request");
+            LOGGER.warning("No OAuth access token available in OAuthContext for PingIDM request");
         }
+        // END: Add OAuth Bearer token from request-scoped OAuthContext
 
         return builder;
     }
@@ -142,13 +145,14 @@ public class PingIdmRestClient {
      * @param endpointUrl the PingIDM endpoint URL
      * @return Response from PingIDM
      * @throws Exception if request fails
-    */
+     */
     public Response getConfig(String endpointUrl) throws Exception {
         LOGGER.info("PingIDM GET (Config): " + endpointUrl);
 
         WebTarget target = target(endpointUrl);
         return buildRequestWithServerToken(target).get();
     }
+
     /**
      * Execute GET request to PingIDM.
      *
@@ -410,10 +414,8 @@ public class PingIdmRestClient {
             client.close();
             LOGGER.info("PingIDM REST client closed");
         }
-        // BEGIN: Close token manager
         if (tokenManager != null) {
             tokenManager.close();
         }
-        // END: Close token manager
     }
 }
