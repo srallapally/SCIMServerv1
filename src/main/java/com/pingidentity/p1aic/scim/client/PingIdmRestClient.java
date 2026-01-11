@@ -191,6 +191,161 @@ public class PingIdmRestClient {
         return buildRequest(target).get();
     }
 
+    // BEGIN: Add WebTarget-based helper methods for safe URL construction
+    /**
+     * Execute GET request to a specific resource using WebTarget.path() for safe URL construction.
+     *
+     * @param baseEndpoint the base endpoint URL (e.g., /openidm/managed/alpha_user)
+     * @param resourceId the resource ID to append to the path
+     * @return Response from PingIDM
+     */
+    public Response getResource(String baseEndpoint, String resourceId) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+        LOGGER.info("PingIDM GET: " + target.getUri());
+        return buildRequest(target).get();
+    }
+
+    /**
+     * Execute GET request to a specific resource with query parameters.
+     *
+     * @param baseEndpoint the base endpoint URL
+     * @param resourceId the resource ID to append to the path
+     * @param queryParams query parameters as key-value pairs
+     * @return Response from PingIDM
+     */
+    public Response getResource(String baseEndpoint, String resourceId, String... queryParams) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+
+        // Add query parameters
+        for (int i = 0; i < queryParams.length; i += 2) {
+            if (i + 1 < queryParams.length) {
+                target = target.queryParam(queryParams[i], queryParams[i + 1]);
+            }
+        }
+
+        LOGGER.info("PingIDM GET: " + target.getUri());
+        return buildRequest(target).get();
+    }
+
+    /**
+     * Execute PUT request to a specific resource using WebTarget.path() for safe URL construction.
+     *
+     * @param baseEndpoint the base endpoint URL
+     * @param resourceId the resource ID to append to the path
+     * @param jsonBody the JSON body as String
+     * @return Response from PingIDM
+     */
+    public Response putResource(String baseEndpoint, String resourceId, String jsonBody) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+        LOGGER.info("PingIDM PUT: " + target.getUri());
+        LOGGER.fine("Request body: " + jsonBody);
+
+        return buildRequest(target)
+                .put(Entity.entity(jsonBody, MediaType.APPLICATION_JSON));
+    }
+
+    /**
+     * Execute PUT request to a specific resource with If-Match header.
+     *
+     * @param baseEndpoint the base endpoint URL
+     * @param resourceId the resource ID to append to the path
+     * @param jsonBody the JSON body as String
+     * @param revision the revision/etag value for If-Match header
+     * @return Response from PingIDM
+     */
+    public Response putResource(String baseEndpoint, String resourceId, String jsonBody, String revision) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+        LOGGER.info("PingIDM PUT: " + target.getUri() + " (If-Match: " + revision + ")");
+        LOGGER.fine("Request body: " + jsonBody);
+
+        Invocation.Builder builder = buildRequest(target);
+
+        // Add If-Match header for optimistic locking
+        if (revision != null && !revision.isEmpty()) {
+            builder.header(HEADER_IF_MATCH, revision);
+        }
+
+        return builder.put(Entity.entity(jsonBody, MediaType.APPLICATION_JSON));
+    }
+
+    /**
+     * Execute PATCH request to a specific resource using WebTarget.path() for safe URL construction.
+     *
+     * @param baseEndpoint the base endpoint URL
+     * @param resourceId the resource ID to append to the path
+     * @param jsonPatch the JSON patch body as String
+     * @return Response from PingIDM
+     */
+    public Response patchResource(String baseEndpoint, String resourceId, String jsonPatch) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+        LOGGER.info("PingIDM PATCH: " + target.getUri());
+        LOGGER.fine("Request body: " + jsonPatch);
+
+        return buildRequest(target)
+                .method("PATCH", Entity.entity(jsonPatch, MediaType.APPLICATION_JSON));
+    }
+
+    /**
+     * Execute PATCH request to a specific resource with If-Match header.
+     *
+     * @param baseEndpoint the base endpoint URL
+     * @param resourceId the resource ID to append to the path
+     * @param jsonPatch the JSON patch body as String
+     * @param revision the revision/etag value for If-Match header
+     * @return Response from PingIDM
+     */
+    public Response patchResource(String baseEndpoint, String resourceId, String jsonPatch, String revision) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+        LOGGER.info("PingIDM PATCH: " + target.getUri() + " (If-Match: " + revision + ")");
+        LOGGER.fine("Request body: " + jsonPatch);
+
+        Invocation.Builder builder = buildRequest(target);
+
+        // Add If-Match header for optimistic locking
+        if (revision != null && !revision.isEmpty()) {
+            builder.header(HEADER_IF_MATCH, revision);
+        }
+
+        return builder.method("PATCH", Entity.entity(jsonPatch, MediaType.APPLICATION_JSON));
+    }
+
+    /**
+     * Execute DELETE request to a specific resource using WebTarget.path() for safe URL construction.
+     *
+     * @param baseEndpoint the base endpoint URL
+     * @param resourceId the resource ID to append to the path
+     * @return Response from PingIDM
+     */
+    public Response deleteResource(String baseEndpoint, String resourceId) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+        LOGGER.info("PingIDM DELETE: " + target.getUri());
+
+        return buildRequest(target).delete();
+    }
+
+    /**
+     * Execute DELETE request to a specific resource with If-Match header.
+     *
+     * @param baseEndpoint the base endpoint URL
+     * @param resourceId the resource ID to append to the path
+     * @param revision the revision/etag value for If-Match header
+     * @return Response from PingIDM
+     */
+    public Response deleteResource(String baseEndpoint, String resourceId, String revision) {
+        WebTarget target = target(baseEndpoint).path(resourceId);
+        LOGGER.info("PingIDM DELETE: " + target.getUri() + " (If-Match: " + revision + ")");
+
+        Invocation.Builder builder = buildRequest(target);
+
+        // Add If-Match header for optimistic locking
+        if (revision != null && !revision.isEmpty()) {
+            builder.header(HEADER_IF_MATCH, revision);
+        }
+
+        return builder.delete();
+    }
+    // END: Add WebTarget-based helper methods for safe URL construction
+
     /**
      * Execute POST request to PingIDM.
      *

@@ -127,15 +127,21 @@ public class PingIdmUserService {
         try {
             LOGGER.info("Getting user: " + userId + ", fields: " + fields);
 
-            // Build endpoint URL
-            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+            // BEGIN: Use WebTarget-based getResource instead of string concatenation
+            // Build endpoint URL using WebTarget.path() for safe URL construction
+            String baseEndpoint = restClient.getManagedUsersEndpoint();
+            // END: Use WebTarget-based getResource instead of string concatenation
 
             // Add fields parameter if specified
             Response response;
             if (fields != null && !fields.equals("*")) {
-                response = restClient.get(endpoint, "_fields", fields);
+                // BEGIN: Use WebTarget-based getResource with query parameters
+                response = restClient.getResource(baseEndpoint, userId, "_fields", fields);
+                // END: Use WebTarget-based getResource with query parameters
             } else {
-                response = restClient.get(endpoint);
+                // BEGIN: Use WebTarget-based getResource without query parameters
+                response = restClient.getResource(baseEndpoint, userId);
+                // END: Use WebTarget-based getResource without query parameters
             }
 
             // Read response immediately
@@ -186,15 +192,21 @@ public class PingIdmUserService {
 
             LOGGER.info("Updating user: " + userId);
 
-            // Build endpoint URL
-            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+            // BEGIN: Use WebTarget-based putResource instead of string concatenation
+            // Build endpoint URL using WebTarget.path() for safe URL construction
+            String baseEndpoint = restClient.getManagedUsersEndpoint();
+            // END: Use WebTarget-based putResource instead of string concatenation
 
             // Call PingIDM update API
             Response response;
             if (revision != null && !revision.isEmpty()) {
-                response = restClient.put(endpoint, jsonBody, revision);
+                // BEGIN: Use WebTarget-based putResource with revision
+                response = restClient.putResource(baseEndpoint, userId, jsonBody, revision);
+                // END: Use WebTarget-based putResource with revision
             } else {
-                response = restClient.put(endpoint, jsonBody);
+                // BEGIN: Use WebTarget-based putResource without revision
+                response = restClient.putResource(baseEndpoint, userId, jsonBody);
+                // END: Use WebTarget-based putResource without revision
             }
 
             // Read response immediately
@@ -239,15 +251,21 @@ public class PingIdmUserService {
         try {
             LOGGER.info("Patching user: " + userId);
 
-            // Build endpoint URL
-            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+            // BEGIN: Use WebTarget-based patchResource instead of string concatenation
+            // Build endpoint URL using WebTarget.path() for safe URL construction
+            String baseEndpoint = restClient.getManagedUsersEndpoint();
+            // END: Use WebTarget-based patchResource instead of string concatenation
 
             // Call PingIDM patch API
             Response response;
             if (revision != null && !revision.isEmpty()) {
-                response = restClient.patch(endpoint, patchOperations, revision);
+                // BEGIN: Use WebTarget-based patchResource with revision
+                response = restClient.patchResource(baseEndpoint, userId, patchOperations, revision);
+                // END: Use WebTarget-based patchResource with revision
             } else {
-                response = restClient.patch(endpoint, patchOperations);
+                // BEGIN: Use WebTarget-based patchResource without revision
+                response = restClient.patchResource(baseEndpoint, userId, patchOperations);
+                // END: Use WebTarget-based patchResource without revision
             }
 
             // Read response immediately
@@ -289,15 +307,21 @@ public class PingIdmUserService {
         try {
             LOGGER.info("Deleting user: " + userId);
 
-            // Build endpoint URL
-            String endpoint = restClient.getManagedUsersEndpoint() + "/" + userId;
+            // BEGIN: Use WebTarget-based deleteResource instead of string concatenation
+            // Build endpoint URL using WebTarget.path() for safe URL construction
+            String baseEndpoint = restClient.getManagedUsersEndpoint();
+            // END: Use WebTarget-based deleteResource instead of string concatenation
 
             // Call PingIDM delete API
             Response response;
             if (revision != null && !revision.isEmpty()) {
-                response = restClient.delete(endpoint, revision);
+                // BEGIN: Use WebTarget-based deleteResource with revision
+                response = restClient.deleteResource(baseEndpoint, userId, revision);
+                // END: Use WebTarget-based deleteResource with revision
             } else {
-                response = restClient.delete(endpoint);
+                // BEGIN: Use WebTarget-based deleteResource without revision
+                response = restClient.deleteResource(baseEndpoint, userId);
+                // END: Use WebTarget-based deleteResource without revision
             }
 
             // Read response immediately

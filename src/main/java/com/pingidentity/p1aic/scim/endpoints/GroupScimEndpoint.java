@@ -147,7 +147,9 @@ public class GroupScimEndpoint {
 
         // Extract group ID for Location header
         String groupId = extractGroupId(createdGroup);
-        String location = "/Groups/" + groupId;
+        // BEGIN: Use UriBuilder instead of string concatenation for Location header
+        String location = jakarta.ws.rs.core.UriBuilder.fromPath("/Groups").path(groupId).build().toString();
+        // END: Use UriBuilder instead of string concatenation for Location header
 
         // Return 201 Created with Location header
         return Response.status(Response.Status.CREATED)

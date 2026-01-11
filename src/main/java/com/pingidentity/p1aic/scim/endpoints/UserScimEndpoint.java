@@ -69,37 +69,37 @@ public class UserScimEndpoint {
             @QueryParam("attributes") String attributes,
             @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException{
 
-            // Apply default startIndex
-            int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
+        // Apply default startIndex
+        int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
 
-            // Handle count parameter including count=0
-            int pageSize;
-            if (count != null && count == 0) {
-                // RFC 7644: count=0 means return only totalResults, no Resources
-                pageSize = 0;
-                LOGGER.info("Count=0 requested: will return only totalResults");
-            } else if (count != null && count > 0) {
-                // Enforce maximum to prevent abuse
-                pageSize = Math.min(count, MAX_COUNT);
-            } else {
-                // Not specified, use default
-                pageSize = DEFAULT_COUNT;
-            }
+        // Handle count parameter including count=0
+        int pageSize;
+        if (count != null && count == 0) {
+            // RFC 7644: count=0 means return only totalResults, no Resources
+            pageSize = 0;
+            LOGGER.info("Count=0 requested: will return only totalResults");
+        } else if (count != null && count > 0) {
+            // Enforce maximum to prevent abuse
+            pageSize = Math.min(count, MAX_COUNT);
+        } else {
+            // Not specified, use default
+            pageSize = DEFAULT_COUNT;
+        }
 
-            LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
-                    filter, start, pageSize, attributes, excludedAttributes));
+        LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
+                filter, start, pageSize, attributes, excludedAttributes));
 
-            // TODO: Convert SCIM filter to PingIDM query filter
-            String queryFilter = filter;
+        // TODO: Convert SCIM filter to PingIDM query filter
+        String queryFilter = filter;
 
-            // Convert SCIM attributes to PingIDM fields
-            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
+        // Convert SCIM attributes to PingIDM fields
+        String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
 
-            // Call service to search users
-            ListResponse<GenericScimResource> listResponse =
-                    userService.searchUsers(queryFilter, start, pageSize, idmFields);
+        // Call service to search users
+        ListResponse<GenericScimResource> listResponse =
+                userService.searchUsers(queryFilter, start, pageSize, idmFields);
 
-            return Response.ok(listResponse).build();
+        return Response.ok(listResponse).build();
     }
 
     /**
@@ -149,7 +149,9 @@ public class UserScimEndpoint {
 
         // Extract user ID for Location header
         String userId = extractUserId(createdUser);
-        String location = "/Users/" + userId;
+        // BEGIN: Use UriBuilder instead of string concatenation for Location header
+        String location = jakarta.ws.rs.core.UriBuilder.fromPath("/Users").path(userId).build().toString();
+        // END: Use UriBuilder instead of string concatenation for Location header
 
         // Return 201 Created with Location header
         return Response.status(Response.Status.CREATED)
@@ -177,7 +179,7 @@ public class UserScimEndpoint {
         LOGGER.info("Updating user: " + id);
         // Extract revision from If-Match header (may be in quotes)
         String revision = extractRevision(ifMatch);
-         // Call service to update user
+        // Call service to update user
         GenericScimResource updatedUser = userService.updateUser(id, user, revision);
         // Return 200 OK with updated user
         return Response.ok(updatedUser).build();
