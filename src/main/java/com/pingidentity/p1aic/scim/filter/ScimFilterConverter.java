@@ -1,20 +1,26 @@
 package com.pingidentity.p1aic.scim.filter;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.pingidentity.p1aic.scim.exceptions.FilterTranslationException;
+import com.unboundid.scim2.common.exceptions.ScimException;
+import com.unboundid.scim2.common.filters.*;
+import com.unboundid.scim2.common.Path;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Logger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Converter for SCIM filter expressions to PingIDM query filter syntax.
  *
+ * REFACTORED: Now uses UnboundID SDK's Filter parser and visitor pattern
+ * instead of fragile regex parsing. This provides proper support for:
+ * - Nested logical operators: (a eq "x" or b eq "y") and c eq "z"
+ * - Complex filter expressions with proper precedence
+ * - Type-safe filter traversal
+ *
  * SCIM filters use a simplified query language defined in RFC 7644 Section 3.4.2.2.
  * PingIDM uses its own query filter syntax for the _queryFilter parameter.
- *
- * This converter translates between the two formats, including attribute name mapping.
  */
 public class ScimFilterConverter {
 
@@ -22,36 +28,6 @@ public class ScimFilterConverter {
 
     // Attribute name mappings (SCIM -> PingIDM)
     private final Map<String, String> attributeMappings;
-
-    // SCIM filter operators and their PingIDM equivalents
-    private static final Map<String, String> OPERATOR_MAPPINGS = new HashMap<>();
-
-    static {
-        OPERATOR_MAPPINGS.put("eq", "eq");
-        OPERATOR_MAPPINGS.put("ne", "ne");
-        OPERATOR_MAPPINGS.put("co", "co");
-        OPERATOR_MAPPINGS.put("sw", "sw");
-        OPERATOR_MAPPINGS.put("ew", "ew");
-        OPERATOR_MAPPINGS.put("gt", "gt");
-        OPERATOR_MAPPINGS.put("ge", "ge");
-        OPERATOR_MAPPINGS.put("lt", "lt");
-        OPERATOR_MAPPINGS.put("le", "le");
-        OPERATOR_MAPPINGS.put("pr", "pr");
-    }
-
-    // Logical operators
-    private static final Map<String, String> LOGICAL_OPERATORS = new HashMap<>();
-
-    static {
-        LOGICAL_OPERATORS.put("and", "and");
-        LOGICAL_OPERATORS.put("or", "or");
-        LOGICAL_OPERATORS.put("not", "!");
-    }
-
-    // Regex patterns for parsing SCIM filters
-    private static final Pattern SIMPLE_FILTER_PATTERN =
-            Pattern.compile("(\\w+(?:\\.\\w+)*)\\s+(eq|ne|co|sw|ew|gt|ge|lt|le|pr)\\s*(?:\"([^\"]*)\"|([^\\s]+))?",
-                    Pattern.CASE_INSENSITIVE);
 
     /**
      * Constructor initializes attribute mappings.
@@ -70,7 +46,7 @@ public class ScimFilterConverter {
     }
 
     /**
-     * Convert SCIM filter to PingIDM query filter.
+     * Convert SCIM filter to PingIDM query filter using UnboundID SDK parser.
      *
      * @param scimFilter the SCIM filter expression (e.g., 'userName eq "john"')
      * @return the PingIDM query filter expression
@@ -84,229 +60,220 @@ public class ScimFilterConverter {
         try {
             LOGGER.info("Converting SCIM filter: " + scimFilter);
 
-            String converted = convertExpression(scimFilter.trim());
+            // BEGIN: Use UnboundID SDK to parse SCIM filter into object graph
+            Filter parsedFilter = Filter.fromString(scimFilter);
+
+            // Use visitor pattern to convert to PingIDM syntax
+            PingIdmFilterVisitor visitor = new PingIdmFilterVisitor(attributeMappings);
+            String converted = parsedFilter.visit(visitor, null);
+            // END: Use UnboundID SDK to parse SCIM filter
 
             LOGGER.info("Converted to PingIDM filter: " + converted);
-
             return converted;
 
-        } catch (Exception e) {
+        } catch (ScimException e) {
             LOGGER.severe("Failed to convert SCIM filter: " + scimFilter);
             throw new FilterTranslationException("Failed to convert SCIM filter: " + e.getMessage(), e);
         }
     }
 
+    // BEGIN: Add PingIDM Filter Visitor implementation
     /**
-     * Convert a SCIM filter expression (may contain logical operators).
+     * Visitor that converts UnboundID Filter objects to PingIDM query syntax.
+     *
+     * This visitor traverses the parsed SCIM filter tree and builds the
+     * equivalent PingIDM query filter string.
+     *
+     * FilterVisitor<R, P> where:
+     * - R is the return type (String - the PingIDM filter expression)
+     * - P is the parameter type (Void - we don't need to pass context)
      */
-    private String convertExpression(String expression) throws FilterTranslationException {
-        // Handle parentheses
-        if (expression.contains("(")) {
-            return convertExpressionWithParentheses(expression);
+    private static class PingIdmFilterVisitor implements FilterVisitor<String, Void> {
+
+        private final Map<String, String> attributeMappings;
+
+        public PingIdmFilterVisitor(Map<String, String> attributeMappings) {
+            this.attributeMappings = attributeMappings;
         }
 
-        // Handle logical operators (and, or)
-        for (String logicalOp : new String[]{"and", "or"}) {
-            int opIndex = findLogicalOperator(expression, logicalOp);
-            if (opIndex > 0) {
-                String left = expression.substring(0, opIndex).trim();
-                String right = expression.substring(opIndex + logicalOp.length()).trim();
-
-                String convertedLeft = convertExpression(left);
-                String convertedRight = convertExpression(right);
-                String idmOperator = LOGICAL_OPERATORS.get(logicalOp.toLowerCase());
-
-                return String.format("(%s %s %s)", convertedLeft, idmOperator, convertedRight);
-            }
+        @Override
+        public String visit(EqualFilter equalFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(equalFilter.getAttributePath(), "eq", equalFilter.getComparisonValue());
         }
 
-        // Handle NOT operator
-        if (expression.toLowerCase().startsWith("not ")) {
-            String inner = expression.substring(4).trim();
-            String convertedInner = convertExpression(inner);
-            return "!" + convertedInner;
+        @Override
+        public String visit(NotEqualFilter notEqualFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(notEqualFilter.getAttributePath(), "ne", notEqualFilter.getComparisonValue());
         }
 
-        // Handle simple comparison
-        return convertSimpleComparison(expression);
-    }
-
-    /**
-     * Convert expression with parentheses.
-     */
-    private String convertExpressionWithParentheses(String expression) throws FilterTranslationException {
-        // Find matching parentheses and recursively convert
-        int depth = 0;
-        int start = -1;
-
-        for (int i = 0; i < expression.length(); i++) {
-            char c = expression.charAt(i);
-
-            if (c == '(') {
-                if (depth == 0) {
-                    start = i;
-                }
-                depth++;
-            } else if (c == ')') {
-                depth--;
-                if (depth == 0 && start >= 0) {
-                    // Found matching closing parenthesis
-                    String inner = expression.substring(start + 1, i);
-                    String converted = convertExpression(inner);
-
-                    // Replace the parenthetical expression and continue
-                    String before = expression.substring(0, start);
-                    String after = expression.substring(i + 1);
-
-                    return convertExpression(before + "(" + converted + ")" + after);
-                }
-            }
+        @Override
+        public String visit(ContainsFilter containsFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(containsFilter.getAttributePath(), "co", containsFilter.getComparisonValue());
         }
 
-        // No parentheses found, treat as simple expression
-        return convertExpression(expression);
-    }
-
-    /**
-     * Find the position of a logical operator (and, or) at the top level (not in parentheses).
-     */
-    private int findLogicalOperator(String expression, String operator) {
-        int depth = 0;
-        String lowerExpr = expression.toLowerCase();
-        String lowerOp = operator.toLowerCase();
-
-        for (int i = 0; i < expression.length(); i++) {
-            char c = expression.charAt(i);
-
-            if (c == '(') {
-                depth++;
-            } else if (c == ')') {
-                depth--;
-            } else if (depth == 0) {
-                // Check if we're at the operator
-                if (i + lowerOp.length() <= lowerExpr.length()) {
-                    String substring = lowerExpr.substring(i, i + lowerOp.length());
-                    if (substring.equals(lowerOp)) {
-                        // Check that it's a word boundary
-                        boolean validBefore = (i == 0 || Character.isWhitespace(expression.charAt(i - 1)));
-                        boolean validAfter = (i + lowerOp.length() >= expression.length() ||
-                                Character.isWhitespace(expression.charAt(i + lowerOp.length())));
-
-                        if (validBefore && validAfter) {
-                            return i;
-                        }
-                    }
-                }
-            }
+        @Override
+        public String visit(StartsWithFilter startsWithFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(startsWithFilter.getAttributePath(), "sw", startsWithFilter.getComparisonValue());
         }
 
-        return -1;
-    }
-
-    /**
-     * Convert a simple SCIM comparison to PingIDM format.
-     * Examples:
-     * - userName eq "john" -> userName eq "john"
-     * - name.familyName co "Smith" -> sn co "Smith"
-     * - active eq true -> accountStatus eq "active"
-     */
-    private String convertSimpleComparison(String comparison) throws FilterTranslationException {
-        Matcher matcher = SIMPLE_FILTER_PATTERN.matcher(comparison);
-
-        if (!matcher.matches()) {
-            throw new FilterTranslationException("Invalid SCIM filter syntax: " + comparison);
+        @Override
+        public String visit(EndsWithFilter endsWithFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(endsWithFilter.getAttributePath(), "ew", endsWithFilter.getComparisonValue());
         }
 
-        String scimAttribute = matcher.group(1);
-        String operator = matcher.group(2).toLowerCase();
-        String value = matcher.group(3) != null ? matcher.group(3) : matcher.group(4);
-
-        // Map attribute name from SCIM to PingIDM
-        String idmAttribute = mapAttributeName(scimAttribute);
-
-        // Map operator
-        String idmOperator = OPERATOR_MAPPINGS.get(operator);
-        if (idmOperator == null) {
-            throw new FilterTranslationException("Unsupported operator: " + operator);
-        }
-
-        // Handle 'pr' (present) operator - no value needed
-        if ("pr".equals(operator)) {
+        @Override
+        public String visit(PresentFilter presentFilter, Void unused) throws ScimException {
+            String idmAttribute = mapAttributeName(presentFilter.getAttributePath());
             return idmAttribute + " pr";
         }
 
-        // Special handling for active attribute (boolean -> string conversion)
-        if ("active".equals(scimAttribute)) {
-            value = convertActiveValue(value);
+        @Override
+        public String visit(GreaterThanFilter greaterThanFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(greaterThanFilter.getAttributePath(), "gt", greaterThanFilter.getComparisonValue());
         }
 
-        // Build PingIDM filter
-        if (value == null || value.isEmpty()) {
-            throw new FilterTranslationException("Missing value for operator: " + operator);
+        @Override
+        public String visit(GreaterThanOrEqualFilter greaterThanOrEqualFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(greaterThanOrEqualFilter.getAttributePath(), "ge", greaterThanOrEqualFilter.getComparisonValue());
         }
 
-        // Quote the value if it's not already quoted and not a boolean/number
-        String quotedValue = quoteValue(value);
+        @Override
+        public String visit(LessThanFilter lessThanFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(lessThanFilter.getAttributePath(), "lt", lessThanFilter.getComparisonValue());
+        }
 
-        return String.format("%s %s %s", idmAttribute, idmOperator, quotedValue);
+        @Override
+        public String visit(LessThanOrEqualFilter lessThanOrEqualFilter, Void unused) throws ScimException {
+            return buildComparisonFilter(lessThanOrEqualFilter.getAttributePath(), "le", lessThanOrEqualFilter.getComparisonValue());
+        }
+
+        @Override
+        public String visit(AndFilter andFilter, Void unused) throws ScimException {
+            // Convert: (filter1 AND filter2) -> (converted1 and converted2)
+            StringBuilder result = new StringBuilder("(");
+            boolean first = true;
+
+            for (Filter component : andFilter.getCombinedFilters()) {
+                if (!first) {
+                    result.append(" and ");
+                }
+                result.append(component.visit(this, unused));
+                first = false;
+            }
+
+            result.append(")");
+            return result.toString();
+        }
+
+        @Override
+        public String visit(OrFilter orFilter, Void unused) throws ScimException {
+            // Convert: (filter1 OR filter2) -> (converted1 or converted2)
+            StringBuilder result = new StringBuilder("(");
+            boolean first = true;
+
+            for (Filter component : orFilter.getCombinedFilters()) {
+                if (!first) {
+                    result.append(" or ");
+                }
+                result.append(component.visit(this, unused));
+                first = false;
+            }
+
+            result.append(")");
+            return result.toString();
+        }
+
+        @Override
+        public String visit(NotFilter notFilter, Void unused) throws ScimException {
+            // Convert: NOT filter -> !converted
+            return "!" + notFilter.getInvertedFilter().visit(this, unused);
+        }
+
+        @Override
+        public String visit(ComplexValueFilter complexValueFilter, Void unused) throws ScimException {
+            // Handle complex attribute filters like: emails[type eq "work"].value
+            // Get the base attribute path (e.g., "emails")
+            String idmAttribute = mapAttributeName(complexValueFilter.getAttributePath());
+
+            // Get the value filter (e.g., "type eq 'work'")
+            String valueFilter = complexValueFilter.getValueFilter().visit(this, unused);
+
+            // This is a simplified approach - may need enhancement based on PingIDM capabilities
+            return "(" + idmAttribute + " " + valueFilter + ")";
+        }
+
+        /**
+         * Build a comparison filter expression in PingIDM syntax.
+         *
+         * CORRECTED: comparisonValue is JsonNode, not FilterValue
+         */
+        private String buildComparisonFilter(Path attributePath, String operator, JsonNode comparisonValue) {
+
+            String idmAttribute = mapAttributeName(attributePath);
+            String idmValue = formatValue(attributePath, comparisonValue);
+
+            return String.format("%s %s %s", idmAttribute, operator, idmValue);
+        }
+
+        /**
+         * Map SCIM attribute path to PingIDM attribute name.
+         */
+        private String mapAttributeName(Path attributePath) {
+            String scimAttribute = attributePath.toString();
+
+            // Use mapping, or pass through if not found
+            String idmAttribute = attributeMappings.getOrDefault(scimAttribute, scimAttribute);
+
+            return idmAttribute;
+        }
+
+        /**
+         * Format a JsonNode value for PingIDM query syntax.
+         *
+         * CORRECTED: Works directly with JsonNode from getComparisonValue()
+         */
+        private String formatValue(Path attributePath, JsonNode jsonValue) {
+
+            if (jsonValue == null || jsonValue.isNull()) {
+                return "null";
+            }
+
+            // Handle special case: active attribute (boolean -> string conversion)
+            String scimAttribute = attributePath.toString();
+            if ("active".equals(scimAttribute) && jsonValue.isBoolean()) {
+                boolean boolValue = jsonValue.asBoolean();
+                return "\"" + (boolValue ? "active" : "inactive") + "\"";
+            }
+
+            // Handle different JsonNode types
+            if (jsonValue.isTextual()) {
+                return "\"" + escapeString(jsonValue.asText()) + "\"";
+            } else if (jsonValue.isBoolean()) {
+                return jsonValue.asBoolean() ? "true" : "false";
+            } else if (jsonValue.isInt() || jsonValue.isLong()) {
+                return String.valueOf(jsonValue.asLong());
+            } else if (jsonValue.isDouble() || jsonValue.isFloat()) {
+                return String.valueOf(jsonValue.asDouble());
+            } else if (jsonValue.isNumber()) {
+                return jsonValue.asText();
+            }
+
+            // For other types (arrays, objects), convert to string representation
+            return "\"" + escapeString(jsonValue.asText()) + "\"";
+        }
+
+        /**
+         * Escape special characters in string values.
+         */
+        private String escapeString(String input) {
+            if (input == null) {
+                return "";
+            }
+            return input.replace("\\", "\\\\")
+                    .replace("\"", "\\\"");
+        }
     }
-
-    /**
-     * Map SCIM attribute name to PingIDM attribute name.
-     */
-    private String mapAttributeName(String scimAttribute) {
-        return attributeMappings.getOrDefault(scimAttribute, scimAttribute);
-    }
-
-    /**
-     * Convert active boolean value to PingIDM accountStatus string.
-     */
-    private String convertActiveValue(String value) {
-        if ("true".equalsIgnoreCase(value)) {
-            return "active";
-        } else if ("false".equalsIgnoreCase(value)) {
-            return "inactive";
-        }
-        return value;
-    }
-
-    /**
-     * Quote a value if needed.
-     */
-    private String quoteValue(String value) {
-        if (value == null) {
-            return "null";
-        }
-
-        // Already quoted
-        if (value.startsWith("\"") && value.endsWith("\"")) {
-            return value;
-        }
-
-        // Boolean or number - don't quote
-        if ("true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value) ||
-                "null".equalsIgnoreCase(value) || isNumeric(value)) {
-            return value;
-        }
-
-        // Quote string values
-        return "\"" + value + "\"";
-    }
-
-    /**
-     * Check if a string is numeric.
-     */
-    private boolean isNumeric(String str) {
-        if (str == null || str.isEmpty()) {
-            return false;
-        }
-        try {
-            Double.parseDouble(str);
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
+    // END: Add PingIDM Filter Visitor implementation
 
     /**
      * Build default attribute mappings for User resources.
