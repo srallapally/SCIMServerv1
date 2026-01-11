@@ -3,6 +3,9 @@ package com.pingidentity.p1aic.scim.endpoints;
 import com.pingidentity.p1aic.scim.schema.DynamicSchemaManager;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaUrns;
 import com.unboundid.scim2.common.GenericScimResource;
+import com.unboundid.scim2.common.exceptions.ScimException;
+import com.unboundid.scim2.common.exceptions.ResourceNotFoundException;
+import com.unboundid.scim2.common.exceptions.BadRequestException;
 import com.unboundid.scim2.common.messages.ListResponse;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
@@ -12,7 +15,6 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -22,6 +24,8 @@ import java.util.logging.Logger;
  * and attributes of User and Group resources.
  *
  * Path: /scim/v2/Schemas
+ *
+ * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
  */
 @Path("/Schemas")
 @Produces("application/scim+json")
@@ -44,47 +48,43 @@ public class SchemasEndpoint {
     @GET
     public Response getAllSchemas(
             @QueryParam("startIndex") Integer startIndex,
-            @QueryParam("count") Integer count) {
+            @QueryParam("count") Integer count) throws ScimException {
+
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
         LOGGER.info("SchemaManager instance hashcode: " + System.identityHashCode(schemaManager));
         LOGGER.info("SchemaManager initialized: "+ schemaManager.isInitialized());
-        try {
-            LOGGER.info("Getting all schemas");
 
-            // Check if schema manager is initialized
-            if (!schemaManager.isInitialized()) {
-                return buildErrorResponse(Response.Status.SERVICE_UNAVAILABLE,
-                        "Schema manager not initialized");
-            }
+        LOGGER.info("Getting all schemas");
 
-            // Get all schemas from the manager
-            List<GenericScimResource> allSchemas = schemaManager.getAllSchemas();
-
-            if (allSchemas.isEmpty()) {
-                LOGGER.warning("No schemas available");
-            }
-
-            // Apply pagination if requested
-            int start = (startIndex != null && startIndex > 0) ? startIndex : 1;
-            int pageSize = (count != null && count > 0) ? count : allSchemas.size();
-
-            // Calculate pagination bounds
-            int fromIndex = Math.max(0, start - 1);
-            int toIndex = Math.min(allSchemas.size(), fromIndex + pageSize);
-
-            // Get the page of results
-            List<GenericScimResource> pageResults = allSchemas.subList(fromIndex, toIndex);
-
-            // Build ListResponse
-            ListResponse<GenericScimResource> listResponse =
-                    new ListResponse<>(allSchemas.size(), pageResults, start, pageSize);
-
-            return Response.ok(listResponse).build();
-
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error getting all schemas", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
+        // Check if schema manager is initialized
+        if (!schemaManager.isInitialized()) {
+            throw new BadRequestException("Schema manager not initialized");
         }
+
+        // Get all schemas from the manager
+        List<GenericScimResource> allSchemas = schemaManager.getAllSchemas();
+
+        if (allSchemas.isEmpty()) {
+            LOGGER.warning("No schemas available");
+        }
+
+        // Apply pagination if requested
+        int start = (startIndex != null && startIndex > 0) ? startIndex : 1;
+        int pageSize = (count != null && count > 0) ? count : allSchemas.size();
+
+        // Calculate pagination bounds
+        int fromIndex = Math.max(0, start - 1);
+        int toIndex = Math.min(allSchemas.size(), fromIndex + pageSize);
+
+        // Get the page of results
+        List<GenericScimResource> pageResults = allSchemas.subList(fromIndex, toIndex);
+
+        // Build ListResponse
+        ListResponse<GenericScimResource> listResponse =
+                new ListResponse<>(allSchemas.size(), pageResults, start, pageSize);
+
+        return Response.ok(listResponse).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -101,36 +101,29 @@ public class SchemasEndpoint {
      */
     @GET
     @Path("/{urn:.+}")
-    public Response getSchema(@PathParam("urn") String urn) {
+    public Response getSchema(@PathParam("urn") String urn) throws ScimException {
 
-        try {
-            LOGGER.info("Getting schema: " + urn);
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Getting schema: " + urn);
 
-            // Check if schema manager is initialized
-            if (!schemaManager.isInitialized()) {
-                return buildErrorResponse(Response.Status.SERVICE_UNAVAILABLE,
-                        "Schema manager not initialized");
-            }
-
-            // Normalize the URN (add "urn:" prefix if missing)
-            String normalizedUrn = normalizeUrn(urn);
-
-            // Get the schema from the manager
-            GenericScimResource schema = schemaManager.getSchema(normalizedUrn);
-
-            if (schema == null) {
-                LOGGER.warning("Schema not found: " + normalizedUrn);
-                return buildErrorResponse(Response.Status.NOT_FOUND,
-                        "Schema not found: " + normalizedUrn);
-            }
-
-            return Response.ok(schema).build();
-
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error getting schema: " + urn, e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
+        // Check if schema manager is initialized
+        if (!schemaManager.isInitialized()) {
+            throw new BadRequestException("Schema manager not initialized");
         }
+
+        // Normalize the URN (add "urn:" prefix if missing)
+        String normalizedUrn = normalizeUrn(urn);
+
+        // Get the schema from the manager
+        GenericScimResource schema = schemaManager.getSchema(normalizedUrn);
+
+        if (schema == null) {
+            LOGGER.warning("Schema not found: " + normalizedUrn);
+            throw new ResourceNotFoundException("Schema not found: " + normalizedUrn);
+        }
+
+        return Response.ok(schema).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -165,35 +158,7 @@ public class SchemasEndpoint {
         return "urn:" + urn;
     }
 
-    /**
-     * Build error response with custom status and message.
-     */
-    private Response buildErrorResponse(Response.Status status, String message) {
-        String errorResponse = String.format(
-                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
-                        "\"status\":\"%d\"," +
-                        "\"detail\":\"%s\"}",
-                status.getStatusCode(),
-                escapeJson(message)
-        );
-
-        return Response.status(status)
-                .entity(errorResponse)
-                .type("application/scim+json")
-                .build();
-    }
-
-    /**
-     * Escape special characters in JSON strings.
-     */
-    private String escapeJson(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
+    // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
+    // ScimExceptionMapper handles all error response formatting
+    // END: Removed buildErrorResponse and escapeJson methods
 }

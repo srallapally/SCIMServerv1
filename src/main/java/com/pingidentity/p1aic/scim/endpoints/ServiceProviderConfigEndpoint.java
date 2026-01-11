@@ -10,7 +10,6 @@ import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Response;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -20,6 +19,9 @@ import java.util.logging.Logger;
  * supported features, and authentication schemes.
  *
  * Path: /scim/v2/ServiceProviderConfig
+ *
+ * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
+ * Note: This endpoint typically doesn't throw ScimException but kept consistent with other endpoints
  */
 @Path("/ServiceProviderConfig")
 @Produces("application/scim+json")
@@ -48,18 +50,13 @@ public class ServiceProviderConfigEndpoint {
     @GET
     public Response getServiceProviderConfig() {
 
-        try {
-            LOGGER.info("Getting service provider configuration");
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Getting service provider configuration");
 
-            GenericScimResource spConfig = buildServiceProviderConfig();
+        GenericScimResource spConfig = buildServiceProviderConfig();
 
-            return Response.ok(spConfig).build();
-
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error getting service provider configuration", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        return Response.ok(spConfig).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -134,35 +131,7 @@ public class ServiceProviderConfigEndpoint {
         return new GenericScimResource(spConfig);
     }
 
-    /**
-     * Build error response with custom status and message.
-     */
-    private Response buildErrorResponse(Response.Status status, String message) {
-        String errorResponse = String.format(
-                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
-                        "\"status\":\"%d\"," +
-                        "\"detail\":\"%s\"}",
-                status.getStatusCode(),
-                escapeJson(message)
-        );
-
-        return Response.status(status)
-                .entity(errorResponse)
-                .type("application/scim+json")
-                .build();
-    }
-
-    /**
-     * Escape special characters in JSON strings.
-     */
-    private String escapeJson(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
+    // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
+    // ScimExceptionMapper handles all error response formatting
+    // END: Removed buildErrorResponse and escapeJson methods
 }

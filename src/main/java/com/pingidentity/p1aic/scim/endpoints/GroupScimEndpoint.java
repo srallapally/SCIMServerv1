@@ -20,7 +20,6 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -28,6 +27,8 @@ import java.util.logging.Logger;
  *
  * Provides CRUD operations and search functionality for groups/roles.
  * Path: /scim/v2/Groups
+ *
+ * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
  */
 @Path("/Groups")
 @Produces("application/scim+json")
@@ -62,47 +63,38 @@ public class GroupScimEndpoint {
             @QueryParam("startIndex") Integer startIndex,
             @QueryParam("count") Integer count,
             @QueryParam("attributes") String attributes,
-            @QueryParam("excludedAttributes") String excludedAttributes) {
+            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException {
 
-        try {
-            // Apply default values
-            int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        // Apply default values
+        int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
 
-            // BEGIN: count=0 optimization - RFC 7644 compliance
-            int pageSize;
-            if (count != null && count == 0) {
-                pageSize = 0;  // RFC 7644: return only totalResults
-                LOGGER.info("Count=0 requested: will return only totalResults");
-            } else if (count != null && count > 0) {
-                pageSize = Math.min(count, MAX_COUNT);
-            } else {
-                pageSize = DEFAULT_COUNT;
-            }
-            // END: count=0 optimization
-
-            LOGGER.info(String.format("Searching groups: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
-                    filter, start, pageSize, attributes, excludedAttributes));
-
-            // TODO: Convert SCIM filter to PingIDM query filter
-            String queryFilter = filter;
-
-            // Convert SCIM attributes to PingIDM fields
-            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
-
-            // Call service to search roles
-            ListResponse<GenericScimResource> listResponse =
-                    roleService.searchRoles(queryFilter, start, pageSize, idmFields);
-
-            return Response.ok(listResponse).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in searchGroups", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in searchGroups", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
+        // Handle count parameter including count=0
+        int pageSize;
+        if (count != null && count == 0) {
+            pageSize = 0;  // RFC 7644: return only totalResults
+            LOGGER.info("Count=0 requested: will return only totalResults");
+        } else if (count != null && count > 0) {
+            pageSize = Math.min(count, MAX_COUNT);
+        } else {
+            pageSize = DEFAULT_COUNT;
         }
+
+        LOGGER.info(String.format("Searching groups: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
+                filter, start, pageSize, attributes, excludedAttributes));
+
+        // TODO: Convert SCIM filter to PingIDM query filter
+        String queryFilter = filter;
+
+        // Convert SCIM attributes to PingIDM fields
+        String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
+
+        // Call service to search roles
+        ListResponse<GenericScimResource> listResponse =
+                roleService.searchRoles(queryFilter, start, pageSize, idmFields);
+
+        return Response.ok(listResponse).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -120,28 +112,20 @@ public class GroupScimEndpoint {
     public Response getGroup(
             @PathParam("id") String id,
             @QueryParam("attributes") String attributes,
-            @QueryParam("excludedAttributes") String excludedAttributes) {
+            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException {
 
-        try {
-            LOGGER.info("Getting group: " + id);
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Getting group: " + id);
 
-            // Convert SCIM attributes to PingIDM fields
-            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
+        // Convert SCIM attributes to PingIDM fields
+        String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
 
-            // Call service to get role
-            GenericScimResource group = roleService.getRole(id, idmFields);
+        // Call service to get role
+        GenericScimResource group = roleService.getRole(id, idmFields);
 
-            // Return 200 OK with group resource
-            return Response.ok(group).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in getGroup", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in getGroup", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 200 OK with group resource
+        return Response.ok(group).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -153,32 +137,24 @@ public class GroupScimEndpoint {
      * @return the created group resource
      */
     @POST
-    public Response createGroup(GenericScimResource group) {
+    public Response createGroup(GenericScimResource group) throws ScimException {
 
-        try {
-            LOGGER.info("Creating group");
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Creating group");
 
-            // Call service to create role
-            GenericScimResource createdGroup = roleService.createRole(group);
+        // Call service to create role
+        GenericScimResource createdGroup = roleService.createRole(group);
 
-            // Extract group ID for Location header
-            String groupId = extractGroupId(createdGroup);
-            String location = "/Groups/" + groupId;
+        // Extract group ID for Location header
+        String groupId = extractGroupId(createdGroup);
+        String location = "/Groups/" + groupId;
 
-            // Return 201 Created with Location header
-            return Response.status(Response.Status.CREATED)
-                    .header("Location", location)
-                    .entity(createdGroup)
-                    .build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in createGroup", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in createGroup", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 201 Created with Location header
+        return Response.status(Response.Status.CREATED)
+                .header("Location", location)
+                .entity(createdGroup)
+                .build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -196,28 +172,20 @@ public class GroupScimEndpoint {
     public Response updateGroup(
             @PathParam("id") String id,
             GenericScimResource group,
-            @HeaderParam("If-Match") String ifMatch) {
+            @HeaderParam("If-Match") String ifMatch) throws ScimException {
 
-        try {
-            LOGGER.info("Updating group: " + id);
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Updating group: " + id);
 
-            // Extract revision from If-Match header (may be in quotes)
-            String revision = extractRevision(ifMatch);
+        // Extract revision from If-Match header (may be in quotes)
+        String revision = extractRevision(ifMatch);
 
-            // Call service to update role
-            GenericScimResource updatedGroup = roleService.updateRole(id, group, revision);
+        // Call service to update role
+        GenericScimResource updatedGroup = roleService.updateRole(id, group, revision);
 
-            // Return 200 OK with updated group
-            return Response.ok(updatedGroup).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in updateGroup", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in updateGroup", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 200 OK with updated group
+        return Response.ok(updatedGroup).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -235,31 +203,23 @@ public class GroupScimEndpoint {
     public Response patchGroup(
             @PathParam("id") String id,
             String patchRequest,
-            @HeaderParam("If-Match") String ifMatch) {
+            @HeaderParam("If-Match") String ifMatch) throws ScimException {
 
-        try {
-            LOGGER.info("Patching group: " + id);
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Patching group: " + id);
 
-            // Extract revision from If-Match header
-            String revision = extractRevision(ifMatch);
+        // Extract revision from If-Match header
+        String revision = extractRevision(ifMatch);
 
-            // TODO: Parse and convert SCIM patch operations to PingIDM format
-            // For now, pass patch request as-is (will be enhanced in Phase 4)
+        // TODO: Parse and convert SCIM patch operations to PingIDM format
+        // For now, pass patch request as-is (will be enhanced in Phase 4)
 
-            // Call service to patch role
-            GenericScimResource patchedGroup = roleService.patchRole(id, patchRequest, revision);
+        // Call service to patch role
+        GenericScimResource patchedGroup = roleService.patchRole(id, patchRequest, revision);
 
-            // Return 200 OK with patched group
-            return Response.ok(patchedGroup).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in patchGroup", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in patchGroup", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 200 OK with patched group
+        return Response.ok(patchedGroup).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -275,28 +235,20 @@ public class GroupScimEndpoint {
     @Path("/{id}")
     public Response deleteGroup(
             @PathParam("id") String id,
-            @HeaderParam("If-Match") String ifMatch) {
+            @HeaderParam("If-Match") String ifMatch) throws ScimException {
 
-        try {
-            LOGGER.info("Deleting group: " + id);
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Deleting group: " + id);
 
-            // Extract revision from If-Match header
-            String revision = extractRevision(ifMatch);
+        // Extract revision from If-Match header
+        String revision = extractRevision(ifMatch);
 
-            // Call service to delete role
-            roleService.deleteRole(id, revision);
+        // Call service to delete role
+        roleService.deleteRole(id, revision);
 
-            // Return 204 No Content
-            return Response.noContent().build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in deleteGroup", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in deleteGroup", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 204 No Content
+        return Response.noContent().build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -378,7 +330,7 @@ public class GroupScimEndpoint {
         try {
             return group.getId();
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to extract group ID", e);
+            LOGGER.warning("Failed to extract group ID: " + e.getMessage());
             return "unknown";
         }
     }
@@ -401,57 +353,7 @@ public class GroupScimEndpoint {
         return revision;
     }
 
-    /**
-     * Build error response from ScimException.
-     */
-    private Response buildErrorResponse(ScimException e) {
-        int statusCode = e.getScimError() != null ?
-                e.getScimError().getStatus() : Response.Status.BAD_REQUEST.getStatusCode();
-
-        // Build SCIM error response
-        String errorResponse = String.format(
-                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
-                        "\"status\":\"%d\"," +
-                        "\"detail\":\"%s\"}",
-                statusCode,
-                escapeJson(e.getMessage())
-        );
-
-        return Response.status(statusCode)
-                .entity(errorResponse)
-                .type("application/scim+json")
-                .build();
-    }
-
-    /**
-     * Build error response with custom status and message.
-     */
-    private Response buildErrorResponse(Response.Status status, String message) {
-        String errorResponse = String.format(
-                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
-                        "\"status\":\"%d\"," +
-                        "\"detail\":\"%s\"}",
-                status.getStatusCode(),
-                escapeJson(message)
-        );
-
-        return Response.status(status)
-                .entity(errorResponse)
-                .type("application/scim+json")
-                .build();
-    }
-
-    /**
-     * Escape special characters in JSON strings.
-     */
-    private String escapeJson(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
+    // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
+    // ScimExceptionMapper handles all error response formatting
+    // END: Removed buildErrorResponse and escapeJson methods
 }

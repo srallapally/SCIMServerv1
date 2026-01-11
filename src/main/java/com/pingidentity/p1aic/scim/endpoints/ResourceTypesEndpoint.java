@@ -1,10 +1,13 @@
 package com.pingidentity.p1aic.scim.endpoints;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaUrns;
 import com.unboundid.scim2.common.GenericScimResource;
+import com.unboundid.scim2.common.exceptions.ResourceNotFoundException;
+import com.unboundid.scim2.common.exceptions.ScimException;
 import com.unboundid.scim2.common.messages.ListResponse;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -14,7 +17,6 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -24,6 +26,8 @@ import java.util.logging.Logger;
  * and their associated schemas and endpoints.
  *
  * Path: /scim/v2/ResourceTypes
+ *
+ * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
  */
 @Path("/ResourceTypes")
 @Produces("application/scim+json")
@@ -54,38 +58,33 @@ public class ResourceTypesEndpoint {
     @GET
     public Response getAllResourceTypes(
             @QueryParam("startIndex") Integer startIndex,
-            @QueryParam("count") Integer count) {
+            @QueryParam("count") Integer count) throws ScimException {
 
-        try {
-            LOGGER.info("Getting all resource types");
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Getting all resource types");
 
-            // Build all resource type definitions
-            List<GenericScimResource> resourceTypes = new ArrayList<>();
-            resourceTypes.add(buildUserResourceType());
-            resourceTypes.add(buildGroupResourceType());
+        // Build all resource type definitions
+        List<GenericScimResource> resourceTypes = new ArrayList<>();
+        resourceTypes.add(buildUserResourceType());
+        resourceTypes.add(buildGroupResourceType());
 
-            // Apply pagination if requested
-            int start = (startIndex != null && startIndex > 0) ? startIndex : 1;
-            int pageSize = (count != null && count > 0) ? count : resourceTypes.size();
+        // Apply pagination if requested
+        int start = (startIndex != null && startIndex > 0) ? startIndex : 1;
+        int pageSize = (count != null && count > 0) ? count : resourceTypes.size();
 
-            // Calculate pagination bounds
-            int fromIndex = Math.max(0, start - 1);
-            int toIndex = Math.min(resourceTypes.size(), fromIndex + pageSize);
+        // Calculate pagination bounds
+        int fromIndex = Math.max(0, start - 1);
+        int toIndex = Math.min(resourceTypes.size(), fromIndex + pageSize);
 
-            // Get the page of results
-            List<GenericScimResource> pageResults = resourceTypes.subList(fromIndex, toIndex);
+        // Get the page of results
+        List<GenericScimResource> pageResults = resourceTypes.subList(fromIndex, toIndex);
 
-            // Build ListResponse
-            ListResponse<GenericScimResource> listResponse =
-                    new ListResponse<>(resourceTypes.size(), pageResults, start, pageSize);
+        // Build ListResponse
+        ListResponse<GenericScimResource> listResponse =
+                new ListResponse<>(resourceTypes.size(), pageResults, start, pageSize);
 
-            return Response.ok(listResponse).build();
-
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error getting all resource types", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        return Response.ok(listResponse).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -98,33 +97,27 @@ public class ResourceTypesEndpoint {
      */
     @GET
     @Path("/{name}")
-    public Response getResourceType(@PathParam("name") String name) {
+    public Response getResourceType(@PathParam("name") String name) throws ScimException {
 
-        try {
-            LOGGER.info("Getting resource type: " + name);
+        // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
+        LOGGER.info("Getting resource type: " + name);
 
-            GenericScimResource resourceType = null;
+        GenericScimResource resourceType = null;
 
-            // Match resource type by name (case-insensitive)
-            if ("User".equalsIgnoreCase(name)) {
-                resourceType = buildUserResourceType();
-            } else if ("Group".equalsIgnoreCase(name)) {
-                resourceType = buildGroupResourceType();
-            }
-
-            if (resourceType == null) {
-                LOGGER.warning("Resource type not found: " + name);
-                return buildErrorResponse(Response.Status.NOT_FOUND,
-                        "Resource type not found: " + name);
-            }
-
-            return Response.ok(resourceType).build();
-
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error getting resource type: " + name, e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
+        // Match resource type by name (case-insensitive)
+        if ("User".equalsIgnoreCase(name)) {
+            resourceType = buildUserResourceType();
+        } else if ("Group".equalsIgnoreCase(name)) {
+            resourceType = buildGroupResourceType();
         }
+
+        if (resourceType == null) {
+            LOGGER.warning("Resource type not found: " + name);
+            throw new ResourceNotFoundException("Resource type not found: " + name);
+        }
+
+        return Response.ok(resourceType).build();
+        // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
@@ -211,35 +204,7 @@ public class ResourceTypesEndpoint {
         return new GenericScimResource(resourceType);
     }
 
-    /**
-     * Build error response with custom status and message.
-     */
-    private Response buildErrorResponse(Response.Status status, String message) {
-        String errorResponse = String.format(
-                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
-                        "\"status\":\"%d\"," +
-                        "\"detail\":\"%s\"}",
-                status.getStatusCode(),
-                escapeJson(message)
-        );
-
-        return Response.status(status)
-                .entity(errorResponse)
-                .type("application/scim+json")
-                .build();
-    }
-
-    /**
-     * Escape special characters in JSON strings.
-     */
-    private String escapeJson(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
+    // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
+    // ScimExceptionMapper handles all error response formatting
+    // END: Removed buildErrorResponse and escapeJson methods
 }

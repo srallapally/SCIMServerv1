@@ -67,9 +67,8 @@ public class UserScimEndpoint {
             @QueryParam("startIndex") Integer startIndex,
             @QueryParam("count") Integer count,
             @QueryParam("attributes") String attributes,
-            @QueryParam("excludedAttributes") String excludedAttributes) {
+            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException{
 
-        try {
             // Apply default startIndex
             int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
 
@@ -101,15 +100,6 @@ public class UserScimEndpoint {
                     userService.searchUsers(queryFilter, start, pageSize, idmFields);
 
             return Response.ok(listResponse).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in searchUsers", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in searchUsers", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
     }
 
     /**
@@ -127,28 +117,18 @@ public class UserScimEndpoint {
     public Response getUser(
             @PathParam("id") String id,
             @QueryParam("attributes") String attributes,
-            @QueryParam("excludedAttributes") String excludedAttributes) {
+            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException{
 
-        try {
-            LOGGER.info("Getting user: " + id);
+        LOGGER.info("Getting user: " + id);
 
-            // Convert SCIM attributes to PingIDM fields
-            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
+        // Convert SCIM attributes to PingIDM fields
+        String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
 
-            // Call service to get user
-            GenericScimResource user = userService.getUser(id, idmFields);
+        // Call service to get user
+        GenericScimResource user = userService.getUser(id, idmFields);
 
-            // Return 200 OK with user resource
-            return Response.ok(user).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in getUser", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in getUser", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 200 OK with user resource
+        return Response.ok(user).build();
     }
 
     /**
@@ -160,32 +140,22 @@ public class UserScimEndpoint {
      * @return the created user resource
      */
     @POST
-    public Response createUser(GenericScimResource user) {
+    public Response createUser(GenericScimResource user) throws ScimException{
 
-        try {
-            LOGGER.info("Creating user");
+        LOGGER.info("Creating user");
 
-            // Call service to create user
-            GenericScimResource createdUser = userService.createUser(user);
+        // Call service to create user
+        GenericScimResource createdUser = userService.createUser(user);
 
-            // Extract user ID for Location header
-            String userId = extractUserId(createdUser);
-            String location = "/Users/" + userId;
+        // Extract user ID for Location header
+        String userId = extractUserId(createdUser);
+        String location = "/Users/" + userId;
 
-            // Return 201 Created with Location header
-            return Response.status(Response.Status.CREATED)
-                    .header("Location", location)
-                    .entity(createdUser)
-                    .build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in createUser", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in createUser", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 201 Created with Location header
+        return Response.status(Response.Status.CREATED)
+                .header("Location", location)
+                .entity(createdUser)
+                .build();
     }
 
     /**
@@ -203,28 +173,14 @@ public class UserScimEndpoint {
     public Response updateUser(
             @PathParam("id") String id,
             GenericScimResource user,
-            @HeaderParam("If-Match") String ifMatch) {
-
-        try {
-            LOGGER.info("Updating user: " + id);
-
-            // Extract revision from If-Match header (may be in quotes)
-            String revision = extractRevision(ifMatch);
-
-            // Call service to update user
-            GenericScimResource updatedUser = userService.updateUser(id, user, revision);
-
-            // Return 200 OK with updated user
-            return Response.ok(updatedUser).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in updateUser", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in updateUser", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+            @HeaderParam("If-Match") String ifMatch) throws ScimException{
+        LOGGER.info("Updating user: " + id);
+        // Extract revision from If-Match header (may be in quotes)
+        String revision = extractRevision(ifMatch);
+         // Call service to update user
+        GenericScimResource updatedUser = userService.updateUser(id, user, revision);
+        // Return 200 OK with updated user
+        return Response.ok(updatedUser).build();
     }
 
     /**
@@ -242,31 +198,19 @@ public class UserScimEndpoint {
     public Response patchUser(
             @PathParam("id") String id,
             String patchRequest,
-            @HeaderParam("If-Match") String ifMatch) {
+            @HeaderParam("If-Match") String ifMatch) throws ScimException{
 
-        try {
-            LOGGER.info("Patching user: " + id);
+        LOGGER.info("Patching user: " + id);
+        // Extract revision from If-Match header
+        String revision = extractRevision(ifMatch);
+        // TODO: Parse and convert SCIM patch operations to PingIDM format
+        // For now, pass patch request as-is
 
-            // Extract revision from If-Match header
-            String revision = extractRevision(ifMatch);
+        // Call service to patch user
+        GenericScimResource patchedUser = userService.patchUser(id, patchRequest, revision);
 
-            // TODO: Parse and convert SCIM patch operations to PingIDM format
-            // For now, pass patch request as-is
-
-            // Call service to patch user
-            GenericScimResource patchedUser = userService.patchUser(id, patchRequest, revision);
-
-            // Return 200 OK with patched user
-            return Response.ok(patchedUser).build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in patchUser", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in patchUser", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Return 200 OK with patched user
+        return Response.ok(patchedUser).build();
     }
 
     /**
@@ -282,28 +226,15 @@ public class UserScimEndpoint {
     @Path("/{id}")
     public Response deleteUser(
             @PathParam("id") String id,
-            @HeaderParam("If-Match") String ifMatch) {
+            @HeaderParam("If-Match") String ifMatch) throws ScimException {
+        LOGGER.info("Deleting user: " + id);
 
-        try {
-            LOGGER.info("Deleting user: " + id);
-
-            // Extract revision from If-Match header
-            String revision = extractRevision(ifMatch);
-
-            // Call service to delete user
-            userService.deleteUser(id, revision);
-
-            // Return 204 No Content
-            return Response.noContent().build();
-
-        } catch (ScimException e) {
-            LOGGER.log(Level.SEVERE, "SCIM exception in deleteUser", e);
-            return buildErrorResponse(e);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Unexpected exception in deleteUser", e);
-            return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
-                    "Internal server error: " + e.getMessage());
-        }
+        // Extract revision from If-Match header
+        String revision = extractRevision(ifMatch);
+        // Call service to delete user
+        userService.deleteUser(id, revision);
+        // Return 204 No Content
+        return Response.noContent().build();
     }
 
     /**
