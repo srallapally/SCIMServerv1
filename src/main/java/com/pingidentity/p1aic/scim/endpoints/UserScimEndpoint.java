@@ -1,8 +1,14 @@
 package com.pingidentity.p1aic.scim.endpoints;
 
 import com.pingidentity.p1aic.scim.service.PingIdmUserService;
+// BEGIN: Add imports for filter and patch conversion
+import com.pingidentity.p1aic.scim.filter.ScimFilterConverter;
+import com.pingidentity.p1aic.scim.filter.ScimPatchConverter;
+import com.pingidentity.p1aic.scim.exceptions.FilterTranslationException;
+// END: Add imports for filter and patch conversion
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.ScimException;
+import com.unboundid.scim2.common.exceptions.BadRequestException;
 import com.unboundid.scim2.common.messages.ListResponse;
 
 import jakarta.inject.Inject;
@@ -49,6 +55,18 @@ public class UserScimEndpoint {
     @Inject
     private PingIdmUserService userService;
 
+    // BEGIN: Add filter and patch converters
+    private final ScimFilterConverter filterConverter;
+    private final ScimPatchConverter patchConverter;
+    // END: Add filter and patch converters
+
+    // BEGIN: Add constructor to initialize converters
+    public UserScimEndpoint() {
+        this.filterConverter = new ScimFilterConverter();
+        this.patchConverter = new ScimPatchConverter("User");
+    }
+    // END: Add constructor to initialize converters
+
     /**
      * Search/List users.
      *
@@ -89,8 +107,18 @@ public class UserScimEndpoint {
         LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
                 filter, start, pageSize, attributes, excludedAttributes));
 
-        // TODO: Convert SCIM filter to PingIDM query filter
-        String queryFilter = filter;
+        // BEGIN: Convert SCIM filter to PingIDM query filter
+        String queryFilter = null;
+        if (filter != null && !filter.trim().isEmpty()) {
+            try {
+                queryFilter = filterConverter.convert(filter);
+                LOGGER.info("Converted SCIM filter '" + filter + "' to PingIDM query: '" + queryFilter + "'");
+            } catch (FilterTranslationException e) {
+                LOGGER.severe("Failed to convert SCIM filter: " + e.getMessage());
+                throw new BadRequestException("Invalid filter expression: " + e.getMessage());
+            }
+        }
+        // END: Convert SCIM filter to PingIDM query filter
 
         // Convert SCIM attributes to PingIDM fields
         String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
@@ -205,11 +233,20 @@ public class UserScimEndpoint {
         LOGGER.info("Patching user: " + id);
         // Extract revision from If-Match header
         String revision = extractRevision(ifMatch);
-        // TODO: Parse and convert SCIM patch operations to PingIDM format
-        // For now, pass patch request as-is
+
+        // BEGIN: Parse and convert SCIM patch operations to PingIDM format
+        String idmPatchOperations;
+        try {
+            idmPatchOperations = patchConverter.convert(patchRequest);
+            LOGGER.info("Converted SCIM PATCH to PingIDM format for user: " + id);
+        } catch (FilterTranslationException e) {
+            LOGGER.severe("Failed to convert SCIM PATCH operations: " + e.getMessage());
+            throw new BadRequestException("Invalid PATCH request: " + e.getMessage());
+        }
+        // END: Parse and convert SCIM patch operations to PingIDM format
 
         // Call service to patch user
-        GenericScimResource patchedUser = userService.patchUser(id, patchRequest, revision);
+        GenericScimResource patchedUser = userService.patchUser(id, idmPatchOperations, revision);
 
         // Return 200 OK with patched user
         return Response.ok(patchedUser).build();
