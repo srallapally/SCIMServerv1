@@ -1,6 +1,5 @@
 package com.pingidentity.p1aic.scim.endpoints;
 
-
 import com.pingidentity.p1aic.scim.service.PingIdmRoleService;
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.ScimException;
@@ -19,6 +18,8 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -46,36 +47,41 @@ public class GroupScimEndpoint {
     /**
      * Search/List groups.
      *
-     * GET /Groups?filter={filter}&startIndex={startIndex}&count={count}
+     * GET /Groups?filter={filter}&startIndex={startIndex}&count={count}&attributes={attributes}
      *
      * @param filter SCIM filter expression (optional)
      * @param startIndex 1-based start index for pagination (default: 1)
      * @param count number of results to return (default: 100, max: 1000)
+     * @param attributes comma-separated list of attributes to return (optional)
+     * @param excludedAttributes comma-separated list of attributes to exclude (optional)
      * @return ListResponse containing groups
      */
     @GET
     public Response searchGroups(
             @QueryParam("filter") String filter,
             @QueryParam("startIndex") Integer startIndex,
-            @QueryParam("count") Integer count) {
+            @QueryParam("count") Integer count,
+            @QueryParam("attributes") String attributes,
+            @QueryParam("excludedAttributes") String excludedAttributes) {
 
         try {
             // Apply default values
             int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
             int pageSize = (count != null && count > 0) ? Math.min(count, MAX_COUNT) : DEFAULT_COUNT;
 
-            LOGGER.info(String.format("Searching groups: filter=%s, startIndex=%d, count=%d",
-                    filter, start, pageSize));
+            LOGGER.info(String.format("Searching groups: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
+                    filter, start, pageSize, attributes, excludedAttributes));
 
             // TODO: Convert SCIM filter to PingIDM query filter
-            // For now, pass filter as-is (will be implemented in Phase 4)
             String queryFilter = filter;
+
+            // Convert SCIM attributes to PingIDM fields
+            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
 
             // Call service to search roles
             ListResponse<GenericScimResource> listResponse =
-                    roleService.searchRoles(queryFilter, start, pageSize);
+                    roleService.searchRoles(queryFilter, start, pageSize, idmFields);
 
-            // Return 200 OK with ListResponse
             return Response.ok(listResponse).build();
 
         } catch (ScimException e) {
@@ -91,20 +97,28 @@ public class GroupScimEndpoint {
     /**
      * Get a group by ID.
      *
-     * GET /Groups/{id}
+     * GET /Groups/{id}?attributes={attributes}
      *
      * @param id the group ID
+     * @param attributes comma-separated list of attributes to return (optional)
+     * @param excludedAttributes comma-separated list of attributes to exclude (optional)
      * @return the group resource
      */
     @GET
     @Path("/{id}")
-    public Response getGroup(@PathParam("id") String id) {
+    public Response getGroup(
+            @PathParam("id") String id,
+            @QueryParam("attributes") String attributes,
+            @QueryParam("excludedAttributes") String excludedAttributes) {
 
         try {
             LOGGER.info("Getting group: " + id);
 
+            // Convert SCIM attributes to PingIDM fields
+            String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
+
             // Call service to get role
-            GenericScimResource group = roleService.getRole(id);
+            GenericScimResource group = roleService.getRole(id, idmFields);
 
             // Return 200 OK with group resource
             return Response.ok(group).build();
@@ -272,6 +286,78 @@ public class GroupScimEndpoint {
             return buildErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
                     "Internal server error: " + e.getMessage());
         }
+    }
+
+    /**
+     * Convert SCIM attributes parameter to PingIDM _fields parameter.
+     *
+     * @param attributes comma-separated SCIM attributes to include
+     * @param excludedAttributes comma-separated SCIM attributes to exclude
+     * @return PingIDM _fields parameter value, or "*" for all fields
+     */
+    private String convertScimAttributesToIdmFields(String attributes, String excludedAttributes) {
+        // If both are null/empty, return all fields
+        if ((attributes == null || attributes.trim().isEmpty()) &&
+                (excludedAttributes == null || excludedAttributes.trim().isEmpty())) {
+            return "*";
+        }
+
+        // Cannot specify both attributes and excludedAttributes
+        if (attributes != null && !attributes.trim().isEmpty() &&
+                excludedAttributes != null && !excludedAttributes.trim().isEmpty()) {
+            throw new IllegalArgumentException("Cannot specify both 'attributes' and 'excludedAttributes'");
+        }
+
+        // Handle attributes (include list)
+        if (attributes != null && !attributes.trim().isEmpty()) {
+            String[] scimAttrs = attributes.split(",");
+            List<String> idmFields = new ArrayList<>();
+
+            // Always include id and meta fields
+            idmFields.add("_id");
+            idmFields.add("_rev");
+
+            for (String scimAttr : scimAttrs) {
+                String trimmed = scimAttr.trim();
+
+                // Map SCIM Group attributes to PingIDM role fields
+                switch (trimmed) {
+                    case "id":
+                        // Already added
+                        break;
+                    case "displayName":
+                        idmFields.add("name");
+                        break;
+                    case "description":
+                        idmFields.add("description");
+                        break;
+                    case "members":
+                    case "members.value":
+                    case "members.$ref":
+                    case "members.type":
+                        idmFields.add("members");
+                        break;
+                    case "meta":
+                        // Already have _rev, timestamps are in _meta if available
+                        break;
+                    default:
+                        // Pass through custom attributes as-is
+                        idmFields.add(trimmed);
+                        break;
+                }
+            }
+
+            return String.join(",", idmFields);
+        }
+
+        // Handle excludedAttributes - not directly supported by PingIDM _fields
+        // Would need to fetch all fields and filter in application layer
+        if (excludedAttributes != null && !excludedAttributes.trim().isEmpty()) {
+            LOGGER.warning("excludedAttributes not fully supported - fetching all fields and will filter in application");
+            return "*";
+        }
+
+        return "*";
     }
 
     /**

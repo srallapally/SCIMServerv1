@@ -1,10 +1,10 @@
 package com.pingidentity.p1aic.scim.service;
-import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
 import com.pingidentity.p1aic.scim.mapping.GroupAttributeMapper;
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.BadRequestException;
@@ -70,14 +70,17 @@ public class PingIdmRoleService {
             String endpoint = restClient.getManagedRolesEndpoint();
             Response response = restClient.postWithAction(endpoint, "create", jsonBody);
 
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
             // Check response status
-            if (response.getStatus() != Response.Status.CREATED.getStatusCode() &&
-                    response.getStatus() != Response.Status.OK.getStatusCode()) {
-                handleErrorResponse(response, "Failed to create role");
+            if (statusCode != Response.Status.CREATED.getStatusCode() &&
+                    statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to create role");
             }
 
             // Parse response body
-            String responseBody = response.readEntity(String.class);
             ObjectNode createdRole = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert back to SCIM format
@@ -99,27 +102,47 @@ public class PingIdmRoleService {
      * @throws ScimException if role not found or retrieval fails
      */
     public GenericScimResource getRole(String roleId) throws ScimException {
+        return getRole(roleId, "*");
+    }
+
+    /**
+     * Get a role by ID from PingIDM with field selection.
+     *
+     * @param roleId the role ID
+     * @param fields the PingIDM fields to return (e.g., "*" for all, or "name,description,members")
+     * @return the role as SCIM group resource
+     * @throws ScimException if role not found or retrieval fails
+     */
+    public GenericScimResource getRole(String roleId, String fields) throws ScimException {
         try {
-            LOGGER.info("Getting role: " + roleId);
+            LOGGER.info("Getting role: " + roleId + ", fields: " + fields);
 
             // Build endpoint URL
             String endpoint = restClient.getManagedRolesEndpoint() + "/" + roleId;
 
-            // Call PingIDM get API
-            Response response = restClient.get(endpoint);
+            // Add fields parameter if specified
+            Response response;
+            if (fields != null && !fields.equals("*")) {
+                response = restClient.get(endpoint, "_fields", fields);
+            } else {
+                response = restClient.get(endpoint);
+            }
+
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
 
             // Check if role exists
-            if (response.getStatus() == Response.Status.NOT_FOUND.getStatusCode()) {
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
                 throw new ResourceNotFoundException("Role not found: " + roleId);
             }
 
             // Check response status
-            if (response.getStatus() != Response.Status.OK.getStatusCode()) {
-                handleErrorResponse(response, "Failed to get role");
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to get role");
             }
 
             // Parse response body
-            String responseBody = response.readEntity(String.class);
             ObjectNode idmRole = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert to SCIM format
@@ -164,18 +187,21 @@ public class PingIdmRoleService {
                 response = restClient.put(endpoint, jsonBody);
             }
 
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
             // Check if role exists
-            if (response.getStatus() == Response.Status.NOT_FOUND.getStatusCode()) {
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
                 throw new ResourceNotFoundException("Role not found: " + roleId);
             }
 
             // Check response status
-            if (response.getStatus() != Response.Status.OK.getStatusCode()) {
-                handleErrorResponse(response, "Failed to update role");
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to update role");
             }
 
             // Parse response body
-            String responseBody = response.readEntity(String.class);
             ObjectNode updatedRole = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert back to SCIM format
@@ -214,18 +240,21 @@ public class PingIdmRoleService {
                 response = restClient.patch(endpoint, patchOperations);
             }
 
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
             // Check if role exists
-            if (response.getStatus() == Response.Status.NOT_FOUND.getStatusCode()) {
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
                 throw new ResourceNotFoundException("Role not found: " + roleId);
             }
 
             // Check response status
-            if (response.getStatus() != Response.Status.OK.getStatusCode()) {
-                handleErrorResponse(response, "Failed to patch role");
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to patch role");
             }
 
             // Parse response body
-            String responseBody = response.readEntity(String.class);
             ObjectNode patchedRole = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert back to SCIM format
@@ -261,15 +290,19 @@ public class PingIdmRoleService {
                 response = restClient.delete(endpoint);
             }
 
+            // Read response immediately
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
             // Check if role exists
-            if (response.getStatus() == Response.Status.NOT_FOUND.getStatusCode()) {
+            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
                 throw new ResourceNotFoundException("Role not found: " + roleId);
             }
 
             // Check response status
-            if (response.getStatus() != Response.Status.OK.getStatusCode() &&
-                    response.getStatus() != Response.Status.NO_CONTENT.getStatusCode()) {
-                handleErrorResponse(response, "Failed to delete role");
+            if (statusCode != Response.Status.OK.getStatusCode() &&
+                    statusCode != Response.Status.NO_CONTENT.getStatusCode()) {
+                handleErrorResponse(statusCode, responseBody, "Failed to delete role");
             }
 
         } catch (ScimException e) {
@@ -291,8 +324,23 @@ public class PingIdmRoleService {
      */
     public ListResponse<GenericScimResource> searchRoles(String queryFilter, int startIndex, int count)
             throws ScimException {
+        return searchRoles(queryFilter, startIndex, count, "*");
+    }
+
+    /**
+     * Search/list roles from PingIDM with field selection.
+     *
+     * @param queryFilter the PingIDM query filter (optional)
+     * @param startIndex the 1-based start index for pagination
+     * @param count the number of results to return
+     * @param fields the PingIDM fields to return (e.g., "*" for all, or "name,description,members")
+     * @return ListResponse containing the roles as SCIM groups
+     * @throws ScimException if search fails
+     */
+    public ListResponse<GenericScimResource> searchRoles(String queryFilter, int startIndex, int count, String fields)
+            throws ScimException {
         try {
-            LOGGER.info("Searching roles with filter: " + queryFilter);
+            LOGGER.info("Searching roles with filter: " + queryFilter + ", fields: " + fields);
 
             // Build endpoint URL with query parameters
             String endpoint = restClient.getManagedRolesEndpoint();
@@ -300,6 +348,7 @@ public class PingIdmRoleService {
             // Build query parameters
             List<String> queryParams = new ArrayList<>();
 
+            // Add query filter parameter
             if (queryFilter != null && !queryFilter.isEmpty()) {
                 queryParams.add("_queryFilter");
                 queryParams.add(queryFilter);
@@ -316,16 +365,36 @@ public class PingIdmRoleService {
             queryParams.add("_pagedResultsOffset");
             queryParams.add(String.valueOf(pageOffset));
 
+            // Add total paged results policy
+            queryParams.add("_totalPagedResultsPolicy");
+            queryParams.add("EXACT");
+
+            // Add fields parameter
+            queryParams.add("_fields");
+            queryParams.add(fields != null ? fields : "*");
+
+            // Log the full URL for debugging
+            StringBuilder urlBuilder = new StringBuilder(endpoint);
+            urlBuilder.append("?");
+            for (int i = 0; i < queryParams.size(); i += 2) {
+                if (i > 0) urlBuilder.append("&");
+                urlBuilder.append(queryParams.get(i)).append("=").append(queryParams.get(i + 1));
+            }
+            LOGGER.info("PingIDM search URL: " + urlBuilder.toString());
+
             // Call PingIDM query API
             Response response = restClient.get(endpoint, queryParams.toArray(new String[0]));
 
-            // Check response status
-            if (response.getStatus() != Response.Status.OK.getStatusCode()) {
-                handleErrorResponse(response, "Failed to search roles");
+            // Read response body before checking status
+            int statusCode = response.getStatus();
+            String responseBody = response.readEntity(String.class);
+
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                LOGGER.severe("PingIDM search failed with status: " + statusCode + ", body: " + responseBody);
+                handleErrorResponse(statusCode, responseBody, "Failed to search roles");
             }
 
             // Parse response body
-            String responseBody = response.readEntity(String.class);
             ObjectNode resultNode = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Extract results array
@@ -339,9 +408,17 @@ public class PingIdmRoleService {
                 }
             }
 
-            // Extract total count
-            int totalResults = resultNode.has("resultCount") ?
-                    resultNode.get("resultCount").asInt() : resources.size();
+            // Extract total count from different possible fields
+            int totalResults = 0;
+            if (resultNode.has("totalPagedResults")) {
+                totalResults = resultNode.get("totalPagedResults").asInt();
+            } else if (resultNode.has("resultCount")) {
+                totalResults = resultNode.get("resultCount").asInt();
+            } else {
+                totalResults = resources.size();
+            }
+
+            LOGGER.info("Found " + totalResults + " total roles, returning " + resources.size() + " in this page");
 
             // Build SCIM ListResponse
             return new ListResponse<>(totalResults, resources, startIndex, count);
@@ -356,34 +433,35 @@ public class PingIdmRoleService {
 
     /**
      * Handle error responses from PingIDM.
+     * Updated to accept status code and response body separately.
      */
-    private void handleErrorResponse(Response response, String defaultMessage) throws ScimException {
+    private void handleErrorResponse(int statusCode, String responseBody, String defaultMessage) throws ScimException {
         String errorMessage = defaultMessage;
 
         try {
-            String responseBody = response.readEntity(String.class);
-            JsonNode errorNode = objectMapper.readTree(responseBody);
+            if (responseBody != null && !responseBody.isEmpty()) {
+                JsonNode errorNode = objectMapper.readTree(responseBody);
 
-            // Try to extract error message from PingIDM response
-            if (errorNode.has("message")) {
-                errorMessage = errorNode.get("message").asText();
-            } else if (errorNode.has("detail")) {
-                errorMessage = errorNode.get("detail").asText();
+                // Try to extract error message from PingIDM response
+                if (errorNode.has("message")) {
+                    errorMessage = errorNode.get("message").asText();
+                } else if (errorNode.has("detail")) {
+                    errorMessage = errorNode.get("detail").asText();
+                }
             }
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to parse error response", e);
         }
 
         // Map HTTP status to appropriate SCIM exception
-        int status = response.getStatus();
-        if (status == Response.Status.NOT_FOUND.getStatusCode()) {
+        if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
             throw new ResourceNotFoundException(errorMessage);
-        } else if (status == Response.Status.CONFLICT.getStatusCode()) {
+        } else if (statusCode == Response.Status.CONFLICT.getStatusCode()) {
             throw new BadRequestException(errorMessage);
-        } else if (status == Response.Status.BAD_REQUEST.getStatusCode()) {
+        } else if (statusCode == Response.Status.BAD_REQUEST.getStatusCode()) {
             throw new BadRequestException(errorMessage);
         } else {
-            throw new BadRequestException(errorMessage + " (HTTP " + status + ")");
+            throw new BadRequestException(errorMessage + " (HTTP " + statusCode + ")");
         }
     }
 }
