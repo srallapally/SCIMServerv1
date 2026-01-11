@@ -11,6 +11,9 @@ import jakarta.ws.rs.client.Invocation;
 import jakarta.ws.rs.client.WebTarget;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.glassfish.jersey.client.ClientConfig;
+import org.glassfish.jersey.client.ClientProperties;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.logging.Logger;
@@ -30,7 +33,8 @@ import java.util.logging.Logger;
 public class PingIdmRestClient {
 
     private static final Logger LOGGER = Logger.getLogger(PingIdmRestClient.class.getName());
-
+    private static final int CONNECT_TIMEOUT_MS = 10000;  // 10 seconds to establish connection
+    private static final int READ_TIMEOUT_MS = 30000;      // 30 seconds to read response
     // PingIDM required headers
     private static final String HEADER_ACCEPT_API_VERSION = "Accept-API-Version";
     private static final String HEADER_AUTHORIZATION = "Authorization";
@@ -53,20 +57,25 @@ public class PingIdmRestClient {
      * Constructor initializes JAX-RS client.
      */
     public PingIdmRestClient() {
-        this.client = ClientBuilder.newClient();
+        // BEGIN: Configure HTTP client with timeouts and connection pooling
+        ClientConfig clientConfig = new ClientConfig();
+
+        // Set connect timeout - how long to wait to establish TCP connection
+        clientConfig.property(ClientProperties.CONNECT_TIMEOUT, CONNECT_TIMEOUT_MS);
+
+        // Set read timeout - how long to wait for response after connection established
+        clientConfig.property(ClientProperties.READ_TIMEOUT, READ_TIMEOUT_MS);
+
+        // Build client with configured properties
+        this.client = ClientBuilder.newClient(clientConfig);
+
+        LOGGER.info("PingIDM REST client initialized with connect timeout: " + CONNECT_TIMEOUT_MS +
+                "ms, read timeout: " + READ_TIMEOUT_MS + "ms");
+        // END: Configure HTTP client with timeouts and connection pooling
+
         this.config = ScimServerConfig.getInstance();
         this.tokenManager = new OAuthTokenManager();
     }
-
-    // BEGIN: Remove static ThreadLocal methods - no longer needed
-    /**
-     * REMOVED: setCurrentOAuthToken(String token)
-     * REMOVED: clearCurrentOAuthToken()
-     *
-     * These static ThreadLocal methods have been removed.
-     * Token is now managed by request-scoped OAuthContext bean.
-     */
-    // END: Remove static ThreadLocal methods
 
     /**
      * Get the OAuth token for the current request.
