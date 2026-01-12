@@ -223,7 +223,7 @@ public class ScimServerMain {
      * Factory for creating request-scoped OAuthContext instances.
      * HK2 uses factories to create per-request instances.
      */
-    static class OAuthContextFactory implements org.glassfish.hk2.api.Factory<OAuthContext> {
+    public static class OAuthContextFactory implements org.glassfish.hk2.api.Factory<OAuthContext> {
         @Override
         public OAuthContext provide() {
             return new OAuthContext();

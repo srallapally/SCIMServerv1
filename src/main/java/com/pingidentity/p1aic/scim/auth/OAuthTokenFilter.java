@@ -9,21 +9,14 @@ import jakarta.ws.rs.container.ContainerResponseFilter;
 import jakarta.ws.rs.container.PreMatching;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
+import org.glassfish.hk2.api.ServiceLocator; // Import ServiceLocator
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * JAX-RS filter for OAuth Bearer token authentication.
- *
- * This filter:
- * 1. Extracts the Bearer token from the Authorization header
- * 2. Validates that the token is present and properly formatted
- * 3. Stores the token in request-scoped OAuthContext for PingIdmRestClient to use
- * 4. OAuthContext is automatically cleaned up when request scope ends
- *
- * Certain endpoints (ServiceProviderConfig, Schemas, ResourceTypes) are
- * exempt from authentication as per SCIM 2.0 specification.
- *
+ * * REFACTORED: Uses ServiceLocator to resolve OAuthContext dynamically.
+ * This prevents "Not inside a request scope" errors during server startup.
  */
 @Provider
 @PreMatching
@@ -31,13 +24,10 @@ public class OAuthTokenFilter implements ContainerRequestFilter, ContainerRespon
 
     private static final Logger logger = LoggerFactory.getLogger(OAuthTokenFilter.class);
 
-    // BEGIN: Inject request-scoped OAuthContext instead of using ThreadLocal
-    //@Inject
-    //private OAuthContext oauthContext;
-
+    // FIXED: Inject ServiceLocator instead of Provider<OAuthContext>
+    // This allows us to look up the request-scoped bean only when needed (at runtime)
     @Inject
-    private jakarta.inject.Provider<OAuthContext> oauthContextProvider;
-    // END: Inject request-scoped OAuthContext
+    private ServiceLocator serviceLocator;
 
     // SCIM endpoints that don't require authentication
     private static final String[] PUBLIC_PATHS = {
@@ -83,34 +73,34 @@ public class OAuthTokenFilter implements ContainerRequestFilter, ContainerRespon
             return;
         }
 
-        // BEGIN: Store token in request-scoped OAuthContext instead of ThreadLocal
-        //oauthContext.setAccessToken(token);
-        OAuthContext oauthContext = oauthContextProvider.get();
-        oauthContext.setAccessToken(token);
-        logger.debug("OAuth token extracted and stored in OAuthContext for request to: {}", path);
-        // END: Store token in request-scoped OAuthContext
+        // FIXED: Retrieve OAuthContext dynamically using ServiceLocator
+        // This ensures the lookup happens inside the active request scope
+        try {
+            OAuthContext oauthContext = serviceLocator.getService(OAuthContext.class);
+            if (oauthContext != null) {
+                oauthContext.setAccessToken(token);
+                logger.debug("OAuth token extracted and stored in OAuthContext for request to: {}", path);
+            } else {
+                logger.error("Failed to resolve OAuthContext from ServiceLocator");
+                abortWithUnauthorized(requestContext, "Internal Server Error: Auth Context unavailable");
+            }
+        } catch (Exception e) {
+            logger.error("Error setting access token in OAuthContext", e);
+            abortWithUnauthorized(requestContext, "Internal Server Error: Auth Context error");
+        }
     }
 
     @Override
     public void filter(ContainerRequestContext requestContext,
                        ContainerResponseContext responseContext) {
-        // BEGIN: Request-scoped bean automatically cleaned up - no manual cleanup needed
-        // The CDI container will destroy the OAuthContext bean when request scope ends
+        // Request-scoped bean automatically cleaned up - no manual cleanup needed
         logger.debug("Request completed - OAuthContext will be automatically cleaned up by CDI container");
-        // END: Request-scoped bean automatically cleaned up
     }
 
-    /**
-     * Abort the request with 401 Unauthorized response.
-     *
-     * @param requestContext the request context
-     * @param message the error message
-     */
     private void abortWithUnauthorized(ContainerRequestContext requestContext, String message) {
         ScimServerConfig config = ScimServerConfig.getInstance();
         String realm = config.getRealm();
 
-        // Build SCIM-compliant error response
         String errorResponse = String.format(
                 "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
                         "\"status\":\"401\"," +
