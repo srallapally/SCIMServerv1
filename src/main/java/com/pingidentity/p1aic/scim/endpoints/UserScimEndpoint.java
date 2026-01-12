@@ -41,8 +41,8 @@ import java.util.logging.Logger;
  * - Supports attribute projection via attributes/excludedAttributes parameters
  */
 @Path("/Users")
-@Produces("application/scim+json")
-@Consumes("application/scim+json")
+@Produces({"application/scim+json", "application/json"})
+@Consumes({"application/scim+json", "application/json"})
 public class UserScimEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(UserScimEndpoint.class.getName());
