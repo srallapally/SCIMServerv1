@@ -28,7 +28,7 @@ import java.util.logging.Logger;
  * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
  */
 @Path("/Schemas")
-@Produces("application/scim+json")
+@Produces({"application/scim+json", "application/json"})
 public class SchemasEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(SchemasEndpoint.class.getName());
