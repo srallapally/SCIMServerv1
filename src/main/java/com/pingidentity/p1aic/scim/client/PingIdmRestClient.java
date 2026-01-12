@@ -4,6 +4,9 @@ import com.pingidentity.p1aic.scim.auth.OAuthContext;
 import com.pingidentity.p1aic.scim.auth.OAuthTokenManager;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import jakarta.inject.Inject;
+// BEGIN: Add Provider import to bridge singleton-to-request scope mismatch
+import jakarta.inject.Provider;
+// END: Add Provider import
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.Entity;
@@ -24,8 +27,8 @@ import java.util.logging.Logger;
  * This client automatically adds required PingIDM headers and uses the OAuth
  * access token stored in request-scoped OAuthContext for the current request.
  *
- * REFACTORED: Now uses @RequestScoped OAuthContext injection instead of ThreadLocal
- * for better compatibility with async/reactive processing models.
+ * REFACTORED: Uses Provider<OAuthContext> to bridge singleton-to-request scope mismatch.
+ * Provider.get() retrieves the current request's OAuthContext instance.
  *
  * The OAuth token is set by OAuthTokenFilter at the start of each request
  * and automatically cleaned up when the request scope ends.
@@ -46,10 +49,11 @@ public class PingIdmRestClient {
     private final Client client;
     private final ScimServerConfig config;
 
-    // BEGIN: Inject request-scoped OAuthContext instead of using ThreadLocal
+    // BEGIN: Inject Provider<OAuthContext> to bridge singleton-to-request scope mismatch
+    // Direct injection of RequestScoped bean into Singleton doesn't work in HK2
     @Inject
-    private OAuthContext oauthContext;
-    // END: Inject request-scoped OAuthContext
+    private Provider<OAuthContext> oauthContextProvider;
+    // END: Inject Provider<OAuthContext>
 
     private final OAuthTokenManager tokenManager;
 
@@ -83,12 +87,26 @@ public class PingIdmRestClient {
      * @return the OAuth token, or null if not set
      */
     private String getCurrentOAuthToken() {
-        // BEGIN: Use injected OAuthContext instead of ThreadLocal
-        if (oauthContext != null && oauthContext.hasAccessToken()) {
-            return oauthContext.getAccessToken();
+        // BEGIN: Use Provider.get() to retrieve current request's OAuthContext
+        try {
+            OAuthContext oauthContext = oauthContextProvider.get();
+            if (oauthContext != null && oauthContext.hasAccessToken()) {
+                String token = oauthContext.getAccessToken();
+                // Log first 20 chars of token for debugging (never log full token)
+                LOGGER.info("Retrieved OAuth token from OAuthContext: " +
+                        (token != null ? token.substring(0, Math.min(20, token.length())) + "..." : "null"));
+                return token;
+            } else {
+                LOGGER.warning("OAuthContext exists but has no access token");
+            }
+        } catch (Exception e) {
+            LOGGER.severe("Failed to get OAuthContext from provider: " + e.getMessage());
+            e.printStackTrace();
         }
+
+        LOGGER.warning("No OAuth token available in current request context");
         return null;
-        // END: Use injected OAuthContext
+        // END: Use Provider.get() to retrieve current request's OAuthContext
     }
 
     /**

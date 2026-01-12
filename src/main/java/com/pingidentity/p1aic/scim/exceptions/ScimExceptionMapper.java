@@ -53,8 +53,7 @@ public class ScimExceptionMapper implements ExceptionMapper<ScimException> {
         // Return HTTP response
         return Response.status(statusCode)
                 .entity(errorResponse)
-                .type(MediaType.APPLICATION_JSON)
-                .header("Content-Type", "application/scim+json")
+                .type("application/scim+json")
                 .build();
     }
 

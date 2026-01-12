@@ -32,8 +32,11 @@ public class OAuthTokenFilter implements ContainerRequestFilter, ContainerRespon
     private static final Logger logger = LoggerFactory.getLogger(OAuthTokenFilter.class);
 
     // BEGIN: Inject request-scoped OAuthContext instead of using ThreadLocal
+    //@Inject
+    //private OAuthContext oauthContext;
+
     @Inject
-    private OAuthContext oauthContext;
+    private jakarta.inject.Provider<OAuthContext> oauthContextProvider;
     // END: Inject request-scoped OAuthContext
 
     // SCIM endpoints that don't require authentication
@@ -81,6 +84,8 @@ public class OAuthTokenFilter implements ContainerRequestFilter, ContainerRespon
         }
 
         // BEGIN: Store token in request-scoped OAuthContext instead of ThreadLocal
+        //oauthContext.setAccessToken(token);
+        OAuthContext oauthContext = oauthContextProvider.get();
         oauthContext.setAccessToken(token);
         logger.debug("OAuth token extracted and stored in OAuthContext for request to: {}", path);
         // END: Store token in request-scoped OAuthContext

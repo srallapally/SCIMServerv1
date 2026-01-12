@@ -1,5 +1,4 @@
 package com.pingidentity.p1aic.scim.auth;
-import jakarta.enterprise.context.RequestScoped;
 
 /**
  * Request-scoped context that holds the OAuth access token for the current HTTP request.
@@ -8,10 +7,14 @@ import jakarta.enterprise.context.RequestScoped;
  * it in this context. Service classes can then inject this context to retrieve the token
  * for making authenticated calls to PingIDM.
  *
- * This bean is request-scoped, meaning a new instance is created for each HTTP request
- * and is automatically destroyed when the request completes.
+ * This bean is managed by HK2's PerLookup scope (request-scoped equivalent) via the
+ * OAuthContextFactory in ScimServerMain. A new instance is created for each injection point
+ * and is automatically cleaned up when the request completes.
+ *
+ * IMPORTANT: This class must NOT use CDI's @RequestScoped annotation as Jersey uses HK2
+ * for dependency injection, not CDI. The request scope is managed through the factory
+ * pattern configured in ScimServerMain.
  */
-@RequestScoped
 public class OAuthContext {
 
     private String accessToken;

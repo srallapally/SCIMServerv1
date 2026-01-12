@@ -1,5 +1,4 @@
 package com.pingidentity.p1aic.scim;
-
 import com.pingidentity.p1aic.scim.auth.OAuthContext;
 import com.pingidentity.p1aic.scim.config.PingIdmConfigService;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaBuilder;
@@ -15,6 +14,7 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import org.glassfish.jersey.process.internal.RequestScoped;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.servlet.ServletContainer;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
@@ -123,7 +123,7 @@ public class ScimServerMain {
                     // Bind OAuthContext as request-scoped (per-request instance)
                     bindFactory(OAuthContextFactory.class)
                             .to(OAuthContext.class)
-                            .in(org.glassfish.hk2.api.PerLookup.class);
+                            .in(RequestScoped.class);
                 }
             });
             // END: Bind services to HK2 DI container
