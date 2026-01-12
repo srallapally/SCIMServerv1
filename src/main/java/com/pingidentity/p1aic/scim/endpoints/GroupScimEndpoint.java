@@ -37,8 +37,8 @@ import java.util.logging.Logger;
  * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
  */
 @Path("/Groups")
-@Produces("application/scim+json")
-@Consumes("application/scim+json")
+@Produces({"application/scim+json", "application/json"})
+@Consumes({"application/scim+json", "application/json"})
 public class GroupScimEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(GroupScimEndpoint.class.getName());
