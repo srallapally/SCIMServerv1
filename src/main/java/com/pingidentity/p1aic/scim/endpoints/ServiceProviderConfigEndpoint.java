@@ -24,7 +24,7 @@ import java.util.logging.Logger;
  * Note: This endpoint typically doesn't throw ScimException but kept consistent with other endpoints
  */
 @Path("/ServiceProviderConfig")
-@Produces("application/scim+json")
+@Produces({"application/scim+json", "application/json"})
 public class ServiceProviderConfigEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(ServiceProviderConfigEndpoint.class.getName());
