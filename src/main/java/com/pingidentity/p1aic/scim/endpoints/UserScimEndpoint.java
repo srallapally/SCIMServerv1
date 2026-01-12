@@ -311,6 +311,11 @@ public class UserScimEndpoint {
             if (!idmFields.contains("_rev")) {
                 idmFields.add("_rev");
             }
+            // BEGIN: Always include userName - required attribute per RFC 7643 Section 4.1
+            if (!idmFields.contains("userName")) {
+                idmFields.add("userName");
+            }
+            // END: Always include userName - required attribute per RFC 7643 Section 4.1
 
             return String.join(",", idmFields);
         }
