@@ -1,6 +1,8 @@
 package com.pingidentity.p1aic.scim;
 import com.pingidentity.p1aic.scim.auth.OAuthContext;
+import com.pingidentity.p1aic.scim.config.CustomAttributeMappingConfig;
 import com.pingidentity.p1aic.scim.config.PingIdmConfigService;
+import com.pingidentity.p1aic.scim.mapping.CustomAttributeMapperService;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaBuilder;
 import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
@@ -117,6 +119,8 @@ public class ScimServerMain {
                     bind(PingIdmRoleService.class).to(PingIdmRoleService.class).in(jakarta.inject.Singleton.class);
                     bind(UserAttributeMapper.class).to(UserAttributeMapper.class).in(jakarta.inject.Singleton.class);
                     bind(PingIdmConfigService.class).to(PingIdmConfigService.class).in(jakarta.inject.Singleton.class);
+                    bind(CustomAttributeMappingConfig.class).to(CustomAttributeMappingConfig.class).in(jakarta.inject.Singleton.class);
+                    bind(CustomAttributeMapperService.class).to(CustomAttributeMapperService.class).in(jakarta.inject.Singleton.class);
                     bind(ScimSchemaBuilder.class).to(ScimSchemaBuilder.class).in(jakarta.inject.Singleton.class);
                     bind(DynamicSchemaManager.class).to(DynamicSchemaManager.class).in(jakarta.inject.Singleton.class);
 
