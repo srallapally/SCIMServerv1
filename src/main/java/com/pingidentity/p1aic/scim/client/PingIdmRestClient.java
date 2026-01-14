@@ -1,5 +1,5 @@
 package com.pingidentity.p1aic.scim.client;
-
+import org.glassfish.jersey.apache.connector.ApacheConnectorProvider;
 import com.pingidentity.p1aic.scim.auth.OAuthContext;
 import com.pingidentity.p1aic.scim.auth.OAuthTokenManager;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
@@ -66,7 +66,7 @@ public class PingIdmRestClient {
      */
     @Inject
     public PingIdmRestClient() {
-        // BEGIN: Configure HTTP client with timeouts and connection pooling
+        // BEGIN: Configure HTTP client with timeouts and Apache connector for PATCH support
         ClientConfig clientConfig = new ClientConfig();
 
         // Set connect timeout - how long to wait to establish TCP connection
@@ -75,12 +75,17 @@ public class PingIdmRestClient {
         // Set read timeout - how long to wait for response after connection established
         clientConfig.property(ClientProperties.READ_TIMEOUT, READ_TIMEOUT_MS);
 
+        // BEGIN: Use Apache HTTP Client connector to support PATCH method
+        // Default HttpURLConnection doesn't support PATCH
+        clientConfig.connectorProvider(new org.glassfish.jersey.apache.connector.ApacheConnectorProvider());
+        // END: Use Apache HTTP Client connector
+
         // Build client with configured properties
         this.client = ClientBuilder.newClient(clientConfig);
 
-        LOGGER.info("PingIDM REST client initialized with connect timeout: " + CONNECT_TIMEOUT_MS +
+        LOGGER.info("PingIDM REST client initialized with Apache connector, connect timeout: " + CONNECT_TIMEOUT_MS +
                 "ms, read timeout: " + READ_TIMEOUT_MS + "ms");
-        // END: Configure HTTP client with timeouts and connection pooling
+        // END: Configure HTTP client with timeouts and Apache connector for PATCH support
 
         this.config = ScimServerConfig.getInstance();
         this.tokenManager = new OAuthTokenManager();

@@ -165,7 +165,53 @@ public class ScimSchemaBuilder {
                 "Indicates if this is the primary phone number"));
         phonesAttr.set("subAttributes", phoneSubAttrs);
         attributes.add(phonesAttr);
+// BEGIN: Add missing SCIM Core User attributes for RFC 7643 compliance
+// addresses - multi-valued complex
+        ObjectNode addressesAttr = createAttribute("addresses", "complex", true, false, false, false, "none",
+                "Physical mailing addresses for the User");
+        ArrayNode addressSubAttrs = objectMapper.createArrayNode();
+        addressSubAttrs.add(createAttribute("formatted", "string", false, false, false, false, "none",
+                "The full mailing address, formatted for display"));
+        addressSubAttrs.add(createAttribute("streetAddress", "string", false, false, false, false, "none",
+                "The full street address component"));
+        addressSubAttrs.add(createAttribute("locality", "string", false, false, false, false, "none",
+                "The city or locality component"));
+        addressSubAttrs.add(createAttribute("region", "string", false, false, false, false, "none",
+                "The state or region component"));
+        addressSubAttrs.add(createAttribute("postalCode", "string", false, false, false, false, "none",
+                "The zip code or postal code component"));
+        addressSubAttrs.add(createAttribute("country", "string", false, false, false, false, "none",
+                "The country name component"));
+        addressSubAttrs.add(createAttribute("type", "string", false, false, false, false, "none",
+                "A label indicating the function of the address"));
+        addressSubAttrs.add(createAttribute("primary", "boolean", false, false, false, false, "none",
+                "Indicates if this is the primary address"));
+        addressesAttr.set("subAttributes", addressSubAttrs);
+        attributes.add(addressesAttr);
 
+        // nickName - single valued string
+        attributes.add(createAttribute("nickName", "string", false, false, false, false, "none",
+                "The casual way to address the user"));
+
+        // userType - single valued string
+        attributes.add(createAttribute("userType", "string", false, false, false, false, "none",
+                "Used to identify the relationship between the organization and the user"));
+
+        // roles - multi-valued complex
+        ObjectNode rolesAttr = createAttribute("roles", "complex", true, false, false, false, "none",
+                "A list of roles for the User");
+        ArrayNode roleSubAttrs = objectMapper.createArrayNode();
+        roleSubAttrs.add(createAttribute("value", "string", false, false, false, false, "none",
+                "The value of a role"));
+        roleSubAttrs.add(createAttribute("display", "string", false, false, false, false, "none",
+                "A human-readable name for the role"));
+        roleSubAttrs.add(createAttribute("type", "string", false, false, false, false, "none",
+                "A label indicating the type of role"));
+        roleSubAttrs.add(createAttribute("primary", "boolean", false, false, false, false, "none",
+                "Indicates if this is the primary role"));
+        rolesAttr.set("subAttributes", roleSubAttrs);
+        attributes.add(rolesAttr);
+// END: Add missing SCIM Core User attributes for RFC 7643 compliance
         // active
         attributes.add(createAttribute("active", "boolean", false, false, false, false, "none",
                 "A Boolean value indicating the User's administrative status"));

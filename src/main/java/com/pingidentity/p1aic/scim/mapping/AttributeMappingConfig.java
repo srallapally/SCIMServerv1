@@ -84,7 +84,29 @@ public class AttributeMappingConfig {
         mappings.put("phoneNumbers[0].value", "telephoneNumber");
         mappings.put("phoneNumbers[primary eq true].value", "telephoneNumber");
         mappings.put("phoneNumbers[type eq \"work\"].value", "telephoneNumber");
+        // BEGIN: Add mappings for missing SCIM Core User attributes
+        // Addresses (multi-valued complex)
+        mappings.put("addresses", "addresses");
+        mappings.put("addresses.formatted", "addresses");
+        mappings.put("addresses.streetAddress", "addresses");
+        mappings.put("addresses.locality", "addresses");
+        mappings.put("addresses.region", "addresses");
+        mappings.put("addresses.postalCode", "addresses");
+        mappings.put("addresses.country", "addresses");
+        mappings.put("addresses.type", "addresses");
 
+        // nickName
+        mappings.put("nickName", "nickName");
+
+        // userType
+        mappings.put("userType", "userType");
+
+        // Roles (multi-valued complex)
+        mappings.put("roles", "roles");
+        mappings.put("roles.value", "roles");
+        mappings.put("roles.display", "roles");
+        mappings.put("roles.type", "roles");
+// END: Add mappings for missing SCIM Core User attributes
         // Additional standard attributes
         mappings.put("title", "title");
         mappings.put("preferredLanguage", "preferredLanguage");

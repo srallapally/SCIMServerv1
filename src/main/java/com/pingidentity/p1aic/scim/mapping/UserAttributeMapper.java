@@ -62,6 +62,7 @@ public class UserAttributeMapper {
         mapping.put("phoneNumbers[0].value", "telephoneNumber");
         mapping.put("phoneNumbers[type eq \"work\"].value", "telephoneNumber");
 
+
         // Additional attributes
         mapping.put("title", "title");
         mapping.put("preferredLanguage", "preferredLanguage");
@@ -187,6 +188,48 @@ public class UserAttributeMapper {
             }
         }
 
+        // BEGIN: Handle addresses - serialize as JSON string for PingIDM custom field storage
+        if (scimNode.has("addresses") && scimNode.get("addresses").isArray()) {
+            ArrayNode addresses = (ArrayNode) scimNode.get("addresses");
+            if (addresses.size() > 0) {
+                try {
+                    String addressesJson = baseMapper.getObjectMapper().writeValueAsString(addresses);
+                    idmUser.put("frUnindexedString6", addressesJson);
+                    LOGGER.fine("Serialized addresses to frUnindexedString6: " + addressesJson);
+                } catch (Exception e) {
+                    LOGGER.warning("Failed to serialize addresses: " + e.getMessage());
+                }
+            }
+        }
+        // END: Handle addresses
+
+        // BEGIN: Handle nickName - store in PingIDM custom field
+        if (scimNode.has("nickName")) {
+            idmUser.put("frUnindexedString7", scimNode.get("nickName").asText());
+        }
+        // END: Handle nickName
+
+        // BEGIN: Handle userType - store in PingIDM custom field
+        if (scimNode.has("userType")) {
+            idmUser.put("frUnindexedString8", scimNode.get("userType").asText());
+        }
+        // END: Handle userType
+
+        // BEGIN: Handle roles - serialize as JSON string for PingIDM custom field storage
+        if (scimNode.has("roles") && scimNode.get("roles").isArray()) {
+            ArrayNode roles = (ArrayNode) scimNode.get("roles");
+            if (roles.size() > 0) {
+                try {
+                    String rolesJson = baseMapper.getObjectMapper().writeValueAsString(roles);
+                    idmUser.put("frUnindexedString9", rolesJson);
+                    LOGGER.fine("Serialized roles to frUnindexedString9: " + rolesJson);
+                } catch (Exception e) {
+                    LOGGER.warning("Failed to serialize roles: " + e.getMessage());
+                }
+            }
+        }
+        // END: Handle roles
+
         // Handle additional simple attributes
         copyIfPresent(scimNode, idmUser, "title", "title");
         copyIfPresent(scimNode, idmUser, "preferredLanguage", "preferredLanguage");
@@ -278,7 +321,57 @@ public class UserAttributeMapper {
             phones.add(phoneObj);
             scimNode.set("phoneNumbers", phones);
         }
+        // BEGIN: Handle addresses - deserialize from JSON string in PingIDM custom field
+        if (idmUser.has("frUnindexedString6")) {
+            try {
+                String addressesJson = idmUser.get("frUnindexedString6").asText();
+                if (addressesJson != null && !addressesJson.isEmpty() && !addressesJson.equals("null")) {
+                    JsonNode addressesNode = baseMapper.getObjectMapper().readTree(addressesJson);
+                    if (addressesNode.isArray()) {
+                        scimNode.set("addresses", addressesNode);
+                        LOGGER.fine("Deserialized addresses from frUnindexedString6");
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warning("Failed to parse addresses JSON: " + e.getMessage());
+            }
+        }
+        // END: Handle addresses
 
+        // BEGIN: Handle nickName - retrieve from PingIDM custom field
+        if (idmUser.has("frUnindexedString7")) {
+            String nickName = idmUser.get("frUnindexedString7").asText();
+            if (nickName != null && !nickName.isEmpty()) {
+                scimNode.put("nickName", nickName);
+            }
+        }
+        // END: Handle nickName
+
+        // BEGIN: Handle userType - retrieve from PingIDM custom field
+        if (idmUser.has("frUnindexedString8")) {
+            String userType = idmUser.get("frUnindexedString8").asText();
+            if (userType != null && !userType.isEmpty()) {
+                scimNode.put("userType", userType);
+            }
+        }
+        // END: Handle userType
+
+        // BEGIN: Handle roles - deserialize from JSON string in PingIDM custom field
+        if (idmUser.has("frUnindexedString9")) {
+            try {
+                String rolesJson = idmUser.get("frUnindexedString9").asText();
+                if (rolesJson != null && !rolesJson.isEmpty() && !rolesJson.equals("null")) {
+                    JsonNode rolesNode = baseMapper.getObjectMapper().readTree(rolesJson);
+                    if (rolesNode.isArray()) {
+                        scimNode.set("roles", rolesNode);
+                        LOGGER.fine("Deserialized roles from frUnindexedString9");
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warning("Failed to parse roles JSON: " + e.getMessage());
+            }
+        }
+        // END: Handle roles
         // Handle additional simple attributes
         copyIfPresent(idmUser, scimNode, "title", "title");
         copyIfPresent(idmUser, scimNode, "preferredLanguage", "preferredLanguage");

@@ -75,6 +75,167 @@
       "mutability": "readWrite",
       "returned": "default"
     },
+    {
+      "_comment": "=== Additional Core User Schema Attributes ===",
+      "_comment2": "These attributes fix the 'undeclared attributes' and 'missing data' errors"
+    },
+    {
+      "scimPath": "addresses",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frUnindexedString6",
+      "type": "complex",
+      "description": "Physical mailing addresses for this User. Stored as JSON string in PingIDM.",
+      "multiValued": true,
+      "required": false,
+      "mutability": "readWrite",
+      "returned": "default",
+      "subAttributes": [
+        {
+          "name": "formatted",
+          "type": "string",
+          "description": "The full mailing address, formatted for display",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "streetAddress",
+          "type": "string",
+          "description": "The full street address component",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "locality",
+          "type": "string",
+          "description": "The city or locality component",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "region",
+          "type": "string",
+          "description": "The state or region component",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "postalCode",
+          "type": "string",
+          "description": "The zip code or postal code component",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "country",
+          "type": "string",
+          "description": "The country name component",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "A label indicating the function of the address (e.g., 'work', 'home')",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default",
+          "canonicalValues": ["work", "home", "other"]
+        },
+        {
+          "name": "primary",
+          "type": "boolean",
+          "description": "Indicates if this is the primary address",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        }
+      ]
+    },
+    {
+      "scimPath": "nickName",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frUnindexedString7",
+      "type": "string",
+      "description": "The casual way to address the user in real life",
+      "multiValued": false,
+      "required": false,
+      "mutability": "readWrite",
+      "returned": "default"
+    },
+    {
+      "scimPath": "userType",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frUnindexedString8",
+      "type": "string",
+      "description": "Used to identify the relationship between the organization and the user (e.g., 'Employee', 'Contractor')",
+      "multiValued": false,
+      "required": false,
+      "mutability": "readWrite",
+      "returned": "default"
+    },
+    {
+      "scimPath": "roles",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frUnindexedString9",
+      "type": "complex",
+      "description": "A list of roles for the User. Stored as JSON string in PingIDM.",
+      "multiValued": true,
+      "required": false,
+      "mutability": "readWrite",
+      "returned": "default",
+      "subAttributes": [
+        {
+          "name": "value",
+          "type": "string",
+          "description": "The value of a role",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "display",
+          "type": "string",
+          "description": "A human-readable name for the role",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "A label indicating the type of role",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "primary",
+          "type": "boolean",
+          "description": "Indicates if this is the primary role",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        }
+      ]
+    },
 
     {
       "_comment": "=== Enterprise User Extension: urn:ietf:params:scim:schemas:extension:enterprise:2.0:User ===",
