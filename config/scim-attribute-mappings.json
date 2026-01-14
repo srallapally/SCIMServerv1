@@ -42,7 +42,7 @@
       "returned": "default"
     },
     {
-      "scimPath": "preferredLocale",
+      "scimPath": "locale",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString3",
       "type": "string",
