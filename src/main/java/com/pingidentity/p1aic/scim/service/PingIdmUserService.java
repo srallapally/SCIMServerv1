@@ -723,22 +723,25 @@ public class PingIdmUserService {
         // Get all SCIM paths that are custom-mapped
         List<String> scimPathsToRemove = new ArrayList<>();
 
-        // Collect Core User attribute paths
+        // Collect Core User attribute paths (both nested and top-level)
         for (var mapping : customAttributeMapper.getMappingConfig().getCoreUserMappings()) {
-            if (!mapping.isNested()) {
-                scimPathsToRemove.add(mapping.getScimPath());
-            } else {
-                // BEGIN: Handle nested attributes like "middleName" in "name.middleName"
-                // Remove the nested attribute from its parent object
+            if (mapping.isNested()) {
+                // Handle nested attributes (e.g., "middleName" in "name.middleName")
                 String parentPath = mapping.getParentPath();
                 String leafName = mapping.getLeafName();
 
+                // Remove from parent object if it exists
                 JsonNode parentNode = idmUser.get(parentPath);
                 if (parentNode != null && parentNode.isObject()) {
                     ((ObjectNode) parentNode).remove(leafName);
                     LOGGER.fine("Removed nested attribute '" + leafName + "' from parent '" + parentPath + "'");
                 }
-                // END: Handle nested attributes
+
+                // Also remove from top level if UserAttributeMapper promoted it
+                scimPathsToRemove.add(leafName);
+            } else {
+                // Top-level attributes
+                scimPathsToRemove.add(mapping.getScimPath());
             }
         }
 
@@ -747,12 +750,17 @@ public class PingIdmUserService {
             scimPathsToRemove.add(mapping.getScimPath());
         }
 
-        // Remove the SCIM attribute names from IDM object
-        scimPathsToRemove.forEach(idmUser::remove);
+        // Remove the SCIM attribute names from top level of IDM object
+        scimPathsToRemove.forEach(attr -> {
+            if (idmUser.has(attr)) {
+                idmUser.remove(attr);
+                LOGGER.fine("Removed top-level SCIM attribute: " + attr);
+            }
+        });
 
         // Also remove the enterprise extension object itself (if present)
         idmUser.remove("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User");
 
-        LOGGER.fine("Removed " + scimPathsToRemove.size() + " unmapped SCIM attribute names from IDM object");
+        LOGGER.info("Cleanup complete: removed " + scimPathsToRemove.size() + " SCIM attribute names from IDM object");
     }
 }
