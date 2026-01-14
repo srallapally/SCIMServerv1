@@ -30,10 +30,10 @@ public class UserAttributeMapper {
 
     /**
      * Default constructor for backward compatibility.
-     * Note: Mappings for addresses, roles, etc., will not work without config.
+     * Note: Dynamic mappings will not work without config injection.
      */
     public UserAttributeMapper() {
-        this(null);
+        this(new CustomAttributeMappingConfig());
     }
 
     /**
@@ -112,19 +112,16 @@ public class UserAttributeMapper {
             }
         }
 
-        // Handle addresses - lookup mapping, serialize if needed
+        // Handle serialized attributes (addresses, roles) via mapping config
+        // These will lookup the mapping and serialize the array to a JSON string
         handleSerializedAttribute(scimNode, idmUser, "addresses");
-
-        // Handle nickName - lookup mapping
-        handleMappedAttribute(scimNode, idmUser, "nickName");
-
-        // Handle userType - lookup mapping
-        handleMappedAttribute(scimNode, idmUser, "userType");
-
-        // Handle roles - lookup mapping, serialize if needed
         handleSerializedAttribute(scimNode, idmUser, "roles");
 
-        // Handle additional simple attributes (dynamically mapped or default pass-through)
+        // Handle simple mapped attributes (nickName, userType)
+        handleMappedAttribute(scimNode, idmUser, "nickName");
+        handleMappedAttribute(scimNode, idmUser, "userType");
+
+        // Handle standard attributes that might be re-mapped
         handleMappedAttribute(scimNode, idmUser, "title");
         handleMappedAttribute(scimNode, idmUser, "preferredLanguage");
         handleMappedAttribute(scimNode, idmUser, "locale");
@@ -216,19 +213,14 @@ public class UserAttributeMapper {
             scimNode.set("phoneNumbers", phones);
         }
 
-        // Handle addresses - deserialize from JSON string in PingIDM custom field
+        // Handle deserialized attributes (addresses, roles)
         handleDeserializedAttribute(idmUser, scimNode, "addresses");
-
-        // Handle nickName - retrieve from PingIDM custom field
-        handleReverseMappedAttribute(idmUser, scimNode, "nickName");
-
-        // Handle userType - retrieve from PingIDM custom field
-        handleReverseMappedAttribute(idmUser, scimNode, "userType");
-
-        // Handle roles - deserialize from JSON string in PingIDM custom field
         handleDeserializedAttribute(idmUser, scimNode, "roles");
 
-        // Handle additional simple attributes
+        // Handle mapped attributes (nickName, userType, etc.)
+        handleReverseMappedAttribute(idmUser, scimNode, "nickName");
+        handleReverseMappedAttribute(idmUser, scimNode, "userType");
+
         handleReverseMappedAttribute(idmUser, scimNode, "title");
         handleReverseMappedAttribute(idmUser, scimNode, "preferredLanguage");
         handleReverseMappedAttribute(idmUser, scimNode, "locale");
@@ -271,7 +263,7 @@ public class UserAttributeMapper {
     }
 
     /**
-     * Handles serialization of complex SCIM attributes (like addresses, roles) into a string IDM field.
+     * Handles serialization of complex SCIM attributes (Array) to JSON string for PingIDM.
      */
     private void handleSerializedAttribute(ObjectNode scimSource, ObjectNode idmDest, String scimAttribute) {
         if (scimSource.has(scimAttribute) && scimSource.get(scimAttribute).isArray()) {
@@ -306,14 +298,11 @@ public class UserAttributeMapper {
                     }
                 }
             } catch (Exception e) {
-                LOGGER.warning("Failed to parse " + scimAttribute + " JSON: " + e.getMessage());
+                LOGGER.warning("Failed to parse " + scimAttribute + " JSON from " + idmAttribute);
             }
         }
     }
 
-    /**
-     * Helper to resolve the PingIDM attribute name from config, or default to the SCIM name.
-     */
     private String resolveIdmAttribute(String scimAttribute) {
         if (mappingConfig != null) {
             Optional<CustomAttributeMapping> mapping = mappingConfig.getByScimPath(scimAttribute);
@@ -321,58 +310,35 @@ public class UserAttributeMapper {
                 return mapping.get().getPingIdmAttribute();
             }
         }
-        return scimAttribute;
+        return scimAttribute; // Fallback if no mapping found
     }
 
-    /**
-     * Extract primary value from multi-valued array, or return first element.
-     */
     private String extractPrimaryOrFirst(ArrayNode array, String valueField) {
         String firstValue = null;
-
         for (JsonNode element : array) {
             if (element.isObject()) {
                 ObjectNode obj = (ObjectNode) element;
-
-                // Check if this is the primary element
                 if (obj.has("primary") && obj.get("primary").asBoolean()) {
-                    if (obj.has(valueField)) {
-                        return obj.get(valueField).asText();
-                    }
+                    if (obj.has(valueField)) return obj.get(valueField).asText();
                 }
-
-                // Store first value as fallback
-                if (firstValue == null && obj.has(valueField)) {
-                    firstValue = obj.get(valueField).asText();
-                }
+                if (firstValue == null && obj.has(valueField)) firstValue = obj.get(valueField).asText();
             }
         }
-
         return firstValue;
     }
 
-    /**
-     * Copy attribute if present in source to destination.
-     */
     private void copyIfPresent(ObjectNode source, ObjectNode dest, String sourceKey, String destKey) {
         if (source.has(sourceKey)) {
             JsonNode value = source.get(sourceKey);
-            if (value != null && !value.isNull()) {
-                dest.set(destKey, value);
-            }
+            if (value != null && !value.isNull()) dest.set(destKey, value);
         }
     }
 
-    /**
-     * Handle SCIM extension attributes (e.g., enterprise extension).
-     */
     private void handleExtensionAttributes(ObjectNode scimNode, ObjectNode idmUser) {
-        // Check for enterprise extension
         if (scimNode.has(ScimSchemaUrns.ENTERPRISE_USER_EXTENSION)) {
             JsonNode extension = scimNode.get(ScimSchemaUrns.ENTERPRISE_USER_EXTENSION);
             if (extension.isObject()) {
                 ObjectNode extNode = (ObjectNode) extension;
-
                 copyIfPresent(extNode, idmUser, "employeeNumber", resolveIdmAttribute("employeeNumber"));
                 copyIfPresent(extNode, idmUser, "costCenter", resolveIdmAttribute("costCenter"));
                 copyIfPresent(extNode, idmUser, "organization", resolveIdmAttribute("organization"));
@@ -381,54 +347,30 @@ public class UserAttributeMapper {
                 copyIfPresent(extNode, idmUser, "manager", resolveIdmAttribute("manager"));
             }
         }
-
-        // Check for custom PingIDM extension
         if (scimNode.has(ScimSchemaUrns.PINGIDM_USER_EXTENSION)) {
             JsonNode extension = scimNode.get(ScimSchemaUrns.PINGIDM_USER_EXTENSION);
             if (extension.isObject()) {
                 ObjectNode extNode = (ObjectNode) extension;
-
-                // Copy all custom attributes to IDM user
-                extNode.fields().forEachRemaining(entry -> {
-                    idmUser.set(entry.getKey(), entry.getValue());
-                });
+                extNode.fields().forEachRemaining(entry -> idmUser.set(entry.getKey(), entry.getValue()));
             }
         }
     }
 
-    /**
-     * Build SCIM meta object from PingIDM metadata.
-     */
     private ObjectNode buildMetaNode(ObjectNode idmUser) {
         ObjectNode metaNode = baseMapper.getObjectMapper().createObjectNode();
-
         metaNode.put("resourceType", "User");
-
-        // Build location URL
         if (idmUser.has("_id")) {
             String id = idmUser.get("_id").asText();
-            String location = String.format("%s/Users/%s", config.getScimServerBaseUrl(), id);
-            metaNode.put("location", location);
+            metaNode.put("location", String.format("%s/Users/%s", config.getScimServerBaseUrl(), id));
         }
-
-        // Set version (use _rev as ETag)
         if (idmUser.has("_rev")) {
             metaNode.put("version", idmUser.get("_rev").asText());
         }
-
-        // Extract timestamps from _meta if available
         if (idmUser.has("_meta") && idmUser.get("_meta").isObject()) {
             ObjectNode idmMeta = (ObjectNode) idmUser.get("_meta");
-
-            if (idmMeta.has("created")) {
-                metaNode.put("created", idmMeta.get("created").asText());
-            }
-
-            if (idmMeta.has("lastModified")) {
-                metaNode.put("lastModified", idmMeta.get("lastModified").asText());
-            }
+            if (idmMeta.has("created")) metaNode.put("created", idmMeta.get("created").asText());
+            if (idmMeta.has("lastModified")) metaNode.put("lastModified", idmMeta.get("lastModified").asText());
         }
-
         return metaNode;
     }
 }
