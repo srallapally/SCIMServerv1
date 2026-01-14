@@ -1,12 +1,16 @@
 package com.pingidentity.p1aic.scim.mapping;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.pingidentity.p1aic.scim.config.CustomAttributeMapping;
+import com.pingidentity.p1aic.scim.config.CustomAttributeMappingConfig;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaUrns;
 import com.unboundid.scim2.common.GenericScimResource;
-import java.util.HashMap;
-import java.util.Map;
+import jakarta.inject.Inject;
+
+import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
@@ -14,114 +18,34 @@ import java.util.logging.Logger;
  * and PingIDM managed user objects.
  *
  * Handles standard SCIM User attributes and their mapping to PingIDM equivalents.
+ * Now supports dynamic mapping via CustomAttributeMappingConfig.
  */
 public class UserAttributeMapper {
 
     private static final Logger LOGGER = Logger.getLogger(UserAttributeMapper.class.getName());
 
     private final DynamicAttributeMapper baseMapper;
-    private final Map<String, String> scimToIdmMapping;
-    private final Map<String, String> idmToScimMapping;
     private final ScimServerConfig config;
+    private final CustomAttributeMappingConfig mappingConfig;
 
     /**
-     * Constructor initializes attribute mappings.
+     * Default constructor for backward compatibility.
+     * Note: Mappings for addresses, roles, etc., will not work without config.
      */
     public UserAttributeMapper() {
+        this(null);
+    }
+
+    /**
+     * Constructor with configuration injection.
+     *
+     * @param mappingConfig the custom attribute mapping configuration
+     */
+    @Inject
+    public UserAttributeMapper(CustomAttributeMappingConfig mappingConfig) {
         this.baseMapper = new DynamicAttributeMapper();
         this.config = ScimServerConfig.getInstance();
-        this.scimToIdmMapping = buildScimToIdmMapping();
-        this.idmToScimMapping = buildIdmToScimMapping();
-    }
-
-    /**
-     * Build SCIM to PingIDM attribute name mapping.
-     */
-    private Map<String, String> buildScimToIdmMapping() {
-        Map<String, String> mapping = new HashMap<>();
-
-        // Core User attributes
-        mapping.put("userName", "userName");
-        mapping.put("displayName", "displayName");
-        mapping.put("active", "accountStatus"); // Special handling: boolean -> string
-        mapping.put("password", "password");
-
-        // Name attributes (SCIM uses complex "name" object)
-        mapping.put("name.givenName", "givenName");
-        mapping.put("name.familyName", "sn");
-        mapping.put("name.formatted", "cn");
-        mapping.put("name.middleName", "middleName");
-        mapping.put("name.honorificPrefix", "honorificPrefix");
-        mapping.put("name.honorificSuffix", "honorificSuffix");
-
-        // Email (SCIM uses multi-valued emails array)
-        mapping.put("emails[0].value", "mail");
-        mapping.put("emails[primary=true].value", "mail");
-
-        // Phone (SCIM uses multi-valued phoneNumbers array)
-        mapping.put("phoneNumbers[0].value", "telephoneNumber");
-        mapping.put("phoneNumbers[type eq \"work\"].value", "telephoneNumber");
-
-
-        // Additional attributes
-        mapping.put("title", "title");
-        mapping.put("preferredLanguage", "preferredLanguage");
-        mapping.put("locale", "locale");
-        mapping.put("timezone", "timezone");
-        mapping.put("profileUrl", "profileUrl");
-
-        // Enterprise extension attributes
-        mapping.put("employeeNumber", "employeeNumber");
-        mapping.put("costCenter", "costCenter");
-        mapping.put("organization", "organization");
-        mapping.put("division", "division");
-        mapping.put("department", "department");
-        mapping.put("manager", "manager");
-
-        return mapping;
-    }
-
-    /**
-     * Build PingIDM to SCIM attribute name mapping (reverse of above).
-     */
-    private Map<String, String> buildIdmToScimMapping() {
-        Map<String, String> mapping = new HashMap<>();
-
-        // Core User attributes
-        mapping.put("userName", "userName");
-        mapping.put("displayName", "displayName");
-        mapping.put("accountStatus", "active"); // Special handling: string -> boolean
-
-        // Name attributes get nested under "name" in SCIM
-        mapping.put("givenName", "name.givenName");
-        mapping.put("sn", "name.familyName");
-        mapping.put("cn", "name.formatted");
-        mapping.put("middleName", "name.middleName");
-        mapping.put("honorificPrefix", "name.honorificPrefix");
-        mapping.put("honorificSuffix", "name.honorificSuffix");
-
-        // Email becomes multi-valued array in SCIM
-        mapping.put("mail", "emails");
-
-        // Phone becomes multi-valued array in SCIM
-        mapping.put("telephoneNumber", "phoneNumbers");
-
-        // Additional attributes
-        mapping.put("title", "title");
-        mapping.put("preferredLanguage", "preferredLanguage");
-        mapping.put("locale", "locale");
-        mapping.put("timezone", "timezone");
-        mapping.put("profileUrl", "profileUrl");
-
-        // Enterprise extension attributes
-        mapping.put("employeeNumber", "employeeNumber");
-        mapping.put("costCenter", "costCenter");
-        mapping.put("organization", "organization");
-        mapping.put("division", "division");
-        mapping.put("department", "department");
-        mapping.put("manager", "manager");
-
-        return mapping;
+        this.mappingConfig = mappingConfig;
     }
 
     /**
@@ -188,54 +112,24 @@ public class UserAttributeMapper {
             }
         }
 
-        // BEGIN: Handle addresses - serialize as JSON string for PingIDM custom field storage
-        if (scimNode.has("addresses") && scimNode.get("addresses").isArray()) {
-            ArrayNode addresses = (ArrayNode) scimNode.get("addresses");
-            if (addresses.size() > 0) {
-                try {
-                    String addressesJson = baseMapper.getObjectMapper().writeValueAsString(addresses);
-                    idmUser.put("frUnindexedString6", addressesJson);
-                    LOGGER.fine("Serialized addresses to frUnindexedString6: " + addressesJson);
-                } catch (Exception e) {
-                    LOGGER.warning("Failed to serialize addresses: " + e.getMessage());
-                }
-            }
-        }
-        // END: Handle addresses
+        // Handle addresses - lookup mapping, serialize if needed
+        handleSerializedAttribute(scimNode, idmUser, "addresses");
 
-        // BEGIN: Handle nickName - store in PingIDM custom field
-        if (scimNode.has("nickName")) {
-            idmUser.put("frUnindexedString7", scimNode.get("nickName").asText());
-        }
-        // END: Handle nickName
+        // Handle nickName - lookup mapping
+        handleMappedAttribute(scimNode, idmUser, "nickName");
 
-        // BEGIN: Handle userType - store in PingIDM custom field
-        if (scimNode.has("userType")) {
-            idmUser.put("frUnindexedString8", scimNode.get("userType").asText());
-        }
-        // END: Handle userType
+        // Handle userType - lookup mapping
+        handleMappedAttribute(scimNode, idmUser, "userType");
 
-        // BEGIN: Handle roles - serialize as JSON string for PingIDM custom field storage
-        if (scimNode.has("roles") && scimNode.get("roles").isArray()) {
-            ArrayNode roles = (ArrayNode) scimNode.get("roles");
-            if (roles.size() > 0) {
-                try {
-                    String rolesJson = baseMapper.getObjectMapper().writeValueAsString(roles);
-                    idmUser.put("frUnindexedString9", rolesJson);
-                    LOGGER.fine("Serialized roles to frUnindexedString9: " + rolesJson);
-                } catch (Exception e) {
-                    LOGGER.warning("Failed to serialize roles: " + e.getMessage());
-                }
-            }
-        }
-        // END: Handle roles
+        // Handle roles - lookup mapping, serialize if needed
+        handleSerializedAttribute(scimNode, idmUser, "roles");
 
-        // Handle additional simple attributes
-        copyIfPresent(scimNode, idmUser, "title", "title");
-        copyIfPresent(scimNode, idmUser, "preferredLanguage", "preferredLanguage");
-        copyIfPresent(scimNode, idmUser, "locale", "locale");
-        copyIfPresent(scimNode, idmUser, "timezone", "timezone");
-        copyIfPresent(scimNode, idmUser, "profileUrl", "profileUrl");
+        // Handle additional simple attributes (dynamically mapped or default pass-through)
+        handleMappedAttribute(scimNode, idmUser, "title");
+        handleMappedAttribute(scimNode, idmUser, "preferredLanguage");
+        handleMappedAttribute(scimNode, idmUser, "locale");
+        handleMappedAttribute(scimNode, idmUser, "timezone");
+        handleMappedAttribute(scimNode, idmUser, "profileUrl");
 
         // Handle custom extension attributes (enterprise extension)
         handleExtensionAttributes(scimNode, idmUser);
@@ -321,69 +215,113 @@ public class UserAttributeMapper {
             phones.add(phoneObj);
             scimNode.set("phoneNumbers", phones);
         }
-        // BEGIN: Handle addresses - deserialize from JSON string in PingIDM custom field
-        if (idmUser.has("frUnindexedString6")) {
-            try {
-                String addressesJson = idmUser.get("frUnindexedString6").asText();
-                if (addressesJson != null && !addressesJson.isEmpty() && !addressesJson.equals("null")) {
-                    JsonNode addressesNode = baseMapper.getObjectMapper().readTree(addressesJson);
-                    if (addressesNode.isArray()) {
-                        scimNode.set("addresses", addressesNode);
-                        LOGGER.fine("Deserialized addresses from frUnindexedString6");
-                    }
-                }
-            } catch (Exception e) {
-                LOGGER.warning("Failed to parse addresses JSON: " + e.getMessage());
-            }
-        }
-        // END: Handle addresses
 
-        // BEGIN: Handle nickName - retrieve from PingIDM custom field
-        if (idmUser.has("frUnindexedString7")) {
-            String nickName = idmUser.get("frUnindexedString7").asText();
-            if (nickName != null && !nickName.isEmpty()) {
-                scimNode.put("nickName", nickName);
-            }
-        }
-        // END: Handle nickName
+        // Handle addresses - deserialize from JSON string in PingIDM custom field
+        handleDeserializedAttribute(idmUser, scimNode, "addresses");
 
-        // BEGIN: Handle userType - retrieve from PingIDM custom field
-        if (idmUser.has("frUnindexedString8")) {
-            String userType = idmUser.get("frUnindexedString8").asText();
-            if (userType != null && !userType.isEmpty()) {
-                scimNode.put("userType", userType);
-            }
-        }
-        // END: Handle userType
+        // Handle nickName - retrieve from PingIDM custom field
+        handleReverseMappedAttribute(idmUser, scimNode, "nickName");
 
-        // BEGIN: Handle roles - deserialize from JSON string in PingIDM custom field
-        if (idmUser.has("frUnindexedString9")) {
-            try {
-                String rolesJson = idmUser.get("frUnindexedString9").asText();
-                if (rolesJson != null && !rolesJson.isEmpty() && !rolesJson.equals("null")) {
-                    JsonNode rolesNode = baseMapper.getObjectMapper().readTree(rolesJson);
-                    if (rolesNode.isArray()) {
-                        scimNode.set("roles", rolesNode);
-                        LOGGER.fine("Deserialized roles from frUnindexedString9");
-                    }
-                }
-            } catch (Exception e) {
-                LOGGER.warning("Failed to parse roles JSON: " + e.getMessage());
-            }
-        }
-        // END: Handle roles
+        // Handle userType - retrieve from PingIDM custom field
+        handleReverseMappedAttribute(idmUser, scimNode, "userType");
+
+        // Handle roles - deserialize from JSON string in PingIDM custom field
+        handleDeserializedAttribute(idmUser, scimNode, "roles");
+
         // Handle additional simple attributes
-        copyIfPresent(idmUser, scimNode, "title", "title");
-        copyIfPresent(idmUser, scimNode, "preferredLanguage", "preferredLanguage");
-        copyIfPresent(idmUser, scimNode, "locale", "locale");
-        copyIfPresent(idmUser, scimNode, "timezone", "timezone");
-        copyIfPresent(idmUser, scimNode, "profileUrl", "profileUrl");
+        handleReverseMappedAttribute(idmUser, scimNode, "title");
+        handleReverseMappedAttribute(idmUser, scimNode, "preferredLanguage");
+        handleReverseMappedAttribute(idmUser, scimNode, "locale");
+        handleReverseMappedAttribute(idmUser, scimNode, "timezone");
+        handleReverseMappedAttribute(idmUser, scimNode, "profileUrl");
 
         // Handle meta object
         ObjectNode metaNode = buildMetaNode(idmUser);
         scimNode.set("meta", metaNode);
 
         return new GenericScimResource(scimNode);
+    }
+
+    /**
+     * Looks up the PingIDM attribute mapping for a SCIM attribute and copies the value.
+     */
+    private void handleMappedAttribute(ObjectNode scimSource, ObjectNode idmDest, String scimAttribute) {
+        String idmAttribute = resolveIdmAttribute(scimAttribute);
+
+        if (scimSource.has(scimAttribute)) {
+            JsonNode value = scimSource.get(scimAttribute);
+            if (value != null && !value.isNull()) {
+                idmDest.set(idmAttribute, value);
+            }
+        }
+    }
+
+    /**
+     * Looks up the PingIDM attribute mapping for a SCIM attribute and copies the value (reverse mapping).
+     */
+    private void handleReverseMappedAttribute(ObjectNode idmSource, ObjectNode scimDest, String scimAttribute) {
+        String idmAttribute = resolveIdmAttribute(scimAttribute);
+
+        if (idmSource.has(idmAttribute)) {
+            JsonNode value = idmSource.get(idmAttribute);
+            if (value != null && !value.isNull()) {
+                scimDest.set(scimAttribute, value);
+            }
+        }
+    }
+
+    /**
+     * Handles serialization of complex SCIM attributes (like addresses, roles) into a string IDM field.
+     */
+    private void handleSerializedAttribute(ObjectNode scimSource, ObjectNode idmDest, String scimAttribute) {
+        if (scimSource.has(scimAttribute) && scimSource.get(scimAttribute).isArray()) {
+            ArrayNode arrayNode = (ArrayNode) scimSource.get(scimAttribute);
+            if (arrayNode.size() > 0) {
+                String idmAttribute = resolveIdmAttribute(scimAttribute);
+                try {
+                    String serializedJson = baseMapper.getObjectMapper().writeValueAsString(arrayNode);
+                    idmDest.put(idmAttribute, serializedJson);
+                    LOGGER.fine("Serialized " + scimAttribute + " to " + idmAttribute + ": " + serializedJson);
+                } catch (Exception e) {
+                    LOGGER.warning("Failed to serialize " + scimAttribute + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Handles deserialization of JSON string from IDM field back to SCIM complex attribute.
+     */
+    private void handleDeserializedAttribute(ObjectNode idmSource, ObjectNode scimDest, String scimAttribute) {
+        String idmAttribute = resolveIdmAttribute(scimAttribute);
+
+        if (idmSource.has(idmAttribute)) {
+            try {
+                String jsonString = idmSource.get(idmAttribute).asText();
+                if (jsonString != null && !jsonString.isEmpty() && !jsonString.equals("null")) {
+                    JsonNode deserializedNode = baseMapper.getObjectMapper().readTree(jsonString);
+                    if (deserializedNode.isArray()) {
+                        scimDest.set(scimAttribute, deserializedNode);
+                        LOGGER.fine("Deserialized " + scimAttribute + " from " + idmAttribute);
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warning("Failed to parse " + scimAttribute + " JSON: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Helper to resolve the PingIDM attribute name from config, or default to the SCIM name.
+     */
+    private String resolveIdmAttribute(String scimAttribute) {
+        if (mappingConfig != null) {
+            Optional<CustomAttributeMapping> mapping = mappingConfig.getByScimPath(scimAttribute);
+            if (mapping.isPresent()) {
+                return mapping.get().getPingIdmAttribute();
+            }
+        }
+        return scimAttribute;
     }
 
     /**
@@ -435,12 +373,12 @@ public class UserAttributeMapper {
             if (extension.isObject()) {
                 ObjectNode extNode = (ObjectNode) extension;
 
-                copyIfPresent(extNode, idmUser, "employeeNumber", "employeeNumber");
-                copyIfPresent(extNode, idmUser, "costCenter", "costCenter");
-                copyIfPresent(extNode, idmUser, "organization", "organization");
-                copyIfPresent(extNode, idmUser, "division", "division");
-                copyIfPresent(extNode, idmUser, "department", "department");
-                copyIfPresent(extNode, idmUser, "manager", "manager");
+                copyIfPresent(extNode, idmUser, "employeeNumber", resolveIdmAttribute("employeeNumber"));
+                copyIfPresent(extNode, idmUser, "costCenter", resolveIdmAttribute("costCenter"));
+                copyIfPresent(extNode, idmUser, "organization", resolveIdmAttribute("organization"));
+                copyIfPresent(extNode, idmUser, "division", resolveIdmAttribute("division"));
+                copyIfPresent(extNode, idmUser, "department", resolveIdmAttribute("department"));
+                copyIfPresent(extNode, idmUser, "manager", resolveIdmAttribute("manager"));
             }
         }
 

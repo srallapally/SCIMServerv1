@@ -5,63 +5,42 @@
 
   "customAttributeMappings": [
     {
-      "_comment": "=== Core User Schema: urn:ietf:params:scim:schemas:core:2.0:User ===",
-      "_comment2": "These attributes are part of the base SCIM User schema but not in PingIDM OOTB"
+      "_comment": "=== Core User Schema Attributes ==="
     },
     {
       "scimPath": "name.middleName",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString1",
       "type": "string",
-      "description": "The middle name(s) of the User",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "The middle name(s) of the User"
     },
     {
       "scimPath": "title",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString2",
       "type": "string",
-      "description": "The user's title, such as Vice President",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "The user's title"
     },
     {
       "scimPath": "preferredLanguage",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frUnindexedString1",
       "type": "string",
-      "description": "Indicates the User's preferred written or spoken language. Format: BCP 47 (e.g., 'en-US')",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "User's preferred language"
     },
     {
       "scimPath": "locale",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString3",
       "type": "string",
-      "description": "Used to indicate the User's default location for purposes of localizing items such as currency and dates. Format: BCP 47 (e.g., 'en-US')",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "User's default location"
     },
     {
       "scimPath": "timezone",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString4",
       "type": "string",
-      "description": "The User's time zone in the IANA Time Zone database format (e.g., 'America/Los_Angeles')",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "User's time zone"
     },
     {
       "scimPath": "profileUrl",
@@ -69,272 +48,98 @@
       "pingIdmAttribute": "frIndexedString5",
       "type": "reference",
       "referenceTypes": ["external"],
-      "description": "A fully qualified URL pointing to a page representing the User's online profile",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "URL to online profile"
     },
     {
-      "_comment": "=== Additional Core User Schema Attributes ===",
-      "_comment2": "These attributes fix the 'undeclared attributes' and 'missing data' errors"
+      "_comment": "=== Mapped Complex/Core Attributes (Previously Hardcoded) ==="
     },
     {
       "scimPath": "addresses",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frUnindexedString6",
+      "pingIdmAttribute": "frIndexedString7",
       "type": "complex",
-      "description": "Physical mailing addresses for this User. Stored as JSON string in PingIDM.",
       "multiValued": true,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default",
-      "subAttributes": [
-        {
-          "name": "formatted",
-          "type": "string",
-          "description": "The full mailing address, formatted for display",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "streetAddress",
-          "type": "string",
-          "description": "The full street address component",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "locality",
-          "type": "string",
-          "description": "The city or locality component",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "region",
-          "type": "string",
-          "description": "The state or region component",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "postalCode",
-          "type": "string",
-          "description": "The zip code or postal code component",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "country",
-          "type": "string",
-          "description": "The country name component",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "type",
-          "type": "string",
-          "description": "A label indicating the function of the address (e.g., 'work', 'home')",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default",
-          "canonicalValues": ["work", "home", "other"]
-        },
-        {
-          "name": "primary",
-          "type": "boolean",
-          "description": "Indicates if this is the primary address",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        }
-      ]
+      "description": "Physical mailing addresses (Serialized JSON)"
     },
     {
       "scimPath": "nickName",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frUnindexedString7",
+      "pingIdmAttribute": "frIndexedString8",
       "type": "string",
-      "description": "The casual way to address the user in real life",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "Casual name of the User"
     },
     {
       "scimPath": "userType",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frUnindexedString8",
+      "pingIdmAttribute": "frIndexedString9",
       "type": "string",
-      "description": "Used to identify the relationship between the organization and the user (e.g., 'Employee', 'Contractor')",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "Organization-to-user relationship"
     },
     {
       "scimPath": "roles",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frUnindexedString9",
+      "pingIdmAttribute": "frIndexedString10",
       "type": "complex",
-      "description": "A list of roles for the User. Stored as JSON string in PingIDM.",
       "multiValued": true,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default",
-      "subAttributes": [
-        {
-          "name": "value",
-          "type": "string",
-          "description": "The value of a role",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "display",
-          "type": "string",
-          "description": "A human-readable name for the role",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "type",
-          "type": "string",
-          "description": "A label indicating the type of role",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        },
-        {
-          "name": "primary",
-          "type": "boolean",
-          "description": "Indicates if this is the primary role",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
-        }
-      ]
+      "description": "List of roles (Serialized JSON)"
     },
-
     {
-      "_comment": "=== Enterprise User Extension: urn:ietf:params:scim:schemas:extension:enterprise:2.0:User ===",
-      "_comment2": "These are standard Enterprise User extension attributes"
+      "_comment": "=== Enterprise User Extension Attributes ==="
     },
     {
       "scimPath": "employeeNumber",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
       "pingIdmAttribute": "frIndexedString6",
       "type": "string",
-      "description": "Numeric or alphanumeric identifier assigned to a person, typically based on order of hire",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "Numeric or alphanumeric identifier"
     },
     {
       "scimPath": "costCenter",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
       "pingIdmAttribute": "frUnindexedString2",
       "type": "string",
-      "description": "Identifies the name of a cost center",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "Name of a cost center"
     },
     {
       "scimPath": "organization",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
       "pingIdmAttribute": "frUnindexedString3",
       "type": "string",
-      "description": "Identifies the name of an organization",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "Name of an organization"
     },
     {
       "scimPath": "division",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
       "pingIdmAttribute": "frUnindexedString4",
       "type": "string",
-      "description": "Identifies the name of a division",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "Name of a division"
     },
     {
       "scimPath": "department",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
       "pingIdmAttribute": "frUnindexedString5",
       "type": "string",
-      "description": "Identifies the name of a department",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default"
+      "description": "Name of a department"
     },
     {
-      "_comment": "=== Manager attribute (complex type per RFC 7643 Section 4.3) ===",
       "scimPath": "manager",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
       "pingIdmAttribute": "manager",
       "type": "complex",
-      "description": "The user's manager. A complex type with subattributes including value, $ref, and displayName",
-      "multiValued": false,
-      "required": false,
-      "mutability": "readWrite",
-      "returned": "default",
+      "description": "The user's manager",
       "subAttributes": [
         {
           "name": "value",
-          "type": "string",
-          "description": "The ID of the user's manager",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default"
+          "type": "string"
         },
         {
           "name": "$ref",
-          "type": "reference",
-          "description": "The URI of the corresponding User resource",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readWrite",
-          "returned": "default",
-          "referenceTypes": ["User"]
+          "type": "reference"
         },
         {
           "name": "displayName",
           "type": "string",
-          "description": "The displayName of the user's manager",
-          "multiValued": false,
-          "required": false,
-          "mutability": "readOnly",
-          "returned": "default"
+          "mutability": "readOnly"
         }
       ]
     }
