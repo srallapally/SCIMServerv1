@@ -6,16 +6,22 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pingidentity.p1aic.scim.exceptions.FilterTranslationException;
 import com.pingidentity.p1aic.scim.mapping.AttributeMappingConfig;
+// BEGIN: Import CustomAttributeMappingConfig for custom attribute handling
+import com.pingidentity.p1aic.scim.config.CustomAttributeMapping;
+import com.pingidentity.p1aic.scim.config.CustomAttributeMappingConfig;
+// END: Import CustomAttributeMappingConfig
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
  * Converter for SCIM PATCH operations to PingIDM PATCH format.
  *
- * SCIM PATCH uses RFC 7644 Section 3.5.2 format with operations like:
+ * <p>SCIM PATCH uses RFC 7644 Section 3.5.2 format with operations like:</p>
+ * <pre>
  * {
  *   "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
  *   "Operations": [
@@ -24,28 +30,43 @@ import java.util.logging.Logger;
  *     {"op": "remove", "path": "phoneNumbers[type eq \"fax\"]"}
  *   ]
  * }
+ * </pre>
  *
- * PingIDM PATCH uses RFC 6902 JSON Patch format:
+ * <p>PingIDM PATCH uses RFC 6902 JSON Patch format:</p>
+ * <pre>
  * [
  *   {"operation": "add", "field": "/mail", "value": "..."},
  *   {"operation": "replace", "field": "/accountStatus", "value": "active"},
  *   {"operation": "remove", "field": "/telephoneNumber"}
  * ]
+ * </pre>
  *
- * Special handling for Group members:
- * - SCIM members use simple value format: [{"value": "user-123"}]
- * - PingIDM expects relationship _ref format: {"_ref": "managed/alpha_user/user-123"}
+ * <p>MODIFIED: Now integrates with {@link CustomAttributeMappingConfig} to handle
+ * custom attribute mappings for attributes that PingIDM doesn't support OOTB
+ * (e.g., Enterprise User extension attributes like employeeNumber, department).</p>
+ *
+ * <p>Special handling for Group members:</p>
+ * <ul>
+ *   <li>SCIM members use simple value format: [{"value": "user-123"}]</li>
+ *   <li>PingIDM expects relationship _ref format: {"_ref": "managed/alpha_user/user-123"}</li>
+ * </ul>
  */
 public class ScimPatchConverter {
 
     private static final Logger LOGGER = Logger.getLogger(ScimPatchConverter.class.getName());
 
+    // BEGIN: Enterprise User schema URN constant
+    private static final String ENTERPRISE_USER_SCHEMA = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+    // END: Enterprise User schema URN constant
+
     private final ObjectMapper objectMapper;
     private final Map<String, String> attributeMappings;
     private final String resourceType; // "User" or "Group"
-    // BEGIN: Add managed user object name for building _ref paths
     private final String managedUserObjectName;
-    // END: Add managed user object name for building _ref paths
+
+    // BEGIN: Add CustomAttributeMappingConfig for custom attribute handling
+    private final CustomAttributeMappingConfig customMappingConfig;
+    // END: Add CustomAttributeMappingConfig
 
     /**
      * Constructor for User resource PATCH conversion.
@@ -53,12 +74,9 @@ public class ScimPatchConverter {
      * @param resourceType the resource type ("User" or "Group")
      */
     public ScimPatchConverter(String resourceType) {
-        // BEGIN: Call new constructor with default managed user object name from environment
-        this(resourceType, System.getenv().getOrDefault("PINGIDM_MANAGED_USER_OBJECT", "alpha_user"));
-        // END: Call new constructor with default managed user object name from environment
+        this(resourceType, System.getenv().getOrDefault("PINGIDM_MANAGED_USER_OBJECT", "alpha_user"), null);
     }
 
-    // BEGIN: Add new constructor that accepts managed user object name
     /**
      * Constructor for PATCH conversion with explicit managed object configuration.
      *
@@ -66,9 +84,23 @@ public class ScimPatchConverter {
      * @param managedUserObjectName the PingIDM managed user object name (e.g., "alpha_user")
      */
     public ScimPatchConverter(String resourceType, String managedUserObjectName) {
+        this(resourceType, managedUserObjectName, null);
+    }
+
+    // BEGIN: Add new constructor that accepts CustomAttributeMappingConfig
+    /**
+     * Constructor for PATCH conversion with custom attribute mapping support.
+     *
+     * @param resourceType the resource type ("User" or "Group")
+     * @param managedUserObjectName the PingIDM managed user object name (e.g., "alpha_user")
+     * @param customMappingConfig the custom attribute mapping configuration (may be null)
+     */
+    public ScimPatchConverter(String resourceType, String managedUserObjectName,
+                              CustomAttributeMappingConfig customMappingConfig) {
         this.objectMapper = new ObjectMapper();
         this.resourceType = resourceType;
         this.managedUserObjectName = managedUserObjectName != null ? managedUserObjectName : "alpha_user";
+        this.customMappingConfig = customMappingConfig;
 
         // Get appropriate attribute mappings based on resource type
         AttributeMappingConfig mappingConfig = AttributeMappingConfig.getInstance();
@@ -81,9 +113,10 @@ public class ScimPatchConverter {
         }
 
         LOGGER.info("ScimPatchConverter initialized for " + resourceType +
-                " with managedUserObjectName=" + this.managedUserObjectName);
+                " with managedUserObjectName=" + this.managedUserObjectName +
+                ", customMappings=" + (customMappingConfig != null && customMappingConfig.hasCustomMappings()));
     }
-    // END: Add new constructor that accepts managed user object name
+    // END: Add new constructor that accepts CustomAttributeMappingConfig
 
     /**
      * Convert SCIM PATCH request to PingIDM PATCH format.
@@ -122,14 +155,12 @@ public class ScimPatchConverter {
             ArrayNode scimOperations = (ArrayNode) operationsNode;
 
             for (JsonNode operation : scimOperations) {
-                // BEGIN: Modified to handle multiple operations returned for members
                 List<ObjectNode> convertedOps = convertOperation(operation);
                 for (ObjectNode idmOp : convertedOps) {
                     if (idmOp != null) {
                         idmOperations.add(idmOp);
                     }
                 }
-                // END: Modified to handle multiple operations returned for members
             }
 
             // Return as JSON array string
@@ -153,7 +184,6 @@ public class ScimPatchConverter {
      * @return List of PingIDM operations (may be empty if operation should be skipped)
      * @throws FilterTranslationException if conversion fails
      */
-    // BEGIN: Changed return type from ObjectNode to List<ObjectNode> to support members expansion
     private List<ObjectNode> convertOperation(JsonNode scimOp) throws FilterTranslationException {
         if (!scimOp.has("op")) {
             throw new FilterTranslationException("SCIM operation missing 'op' field");
@@ -181,13 +211,11 @@ public class ScimPatchConverter {
 
         return results;
     }
-    // END: Changed return type from ObjectNode to List<ObjectNode> to support members expansion
 
     /**
      * Convert SCIM "add" operation to PingIDM format.
      * For members, creates separate operations for each member with _ref format.
      */
-    // BEGIN: Changed return type and signature to support multiple operations for members
     private List<ObjectNode> convertAddOperation(String path, JsonNode value)
             throws FilterTranslationException {
         List<ObjectNode> operations = new ArrayList<>();
@@ -196,85 +224,95 @@ public class ScimPatchConverter {
             throw new FilterTranslationException("'add' operation requires a value");
         }
 
-        // If path is null, we're adding fields from the value object
+        // If path is null, value is an object with attribute names as keys
         if (path == null || path.isEmpty()) {
-            // For no-path add, the value should be an object with fields to add
-            if (!value.isObject()) {
-                throw new FilterTranslationException("'add' without path requires value to be an object");
+            if (value.isObject()) {
+                // Iterate through each attribute in the value
+                value.fields().forEachRemaining(entry -> {
+                    String attrPath = entry.getKey();
+                    JsonNode attrValue = entry.getValue();
+
+                    // Check if this is members (Group)
+                    if ("members".equalsIgnoreCase(attrPath) && "Group".equalsIgnoreCase(resourceType)) {
+                        try {
+                            operations.addAll(convertMembersAddOperation(attrValue));
+                        } catch (FilterTranslationException e) {
+                            LOGGER.severe("Failed to convert members add: " + e.getMessage());
+                        }
+                    } else {
+                        ObjectNode idmOp = createIdmOperation("add", attrPath, attrValue);
+                        if (idmOp != null) {
+                            operations.add(idmOp);
+                        }
+                    }
+                });
             }
-            // For simplicity, we'll add each field separately
-            // This creates multiple operations, but we'll return just the first
-            // A more complete implementation would return multiple operations
-            LOGGER.warning("'add' without path not fully supported - use explicit paths");
-            return operations;
+        } else {
+            // Path is specified - handle members specially for Groups
+            if ("members".equalsIgnoreCase(path) && "Group".equalsIgnoreCase(resourceType)) {
+                operations.addAll(convertMembersAddOperation(value));
+            } else {
+                // Standard attribute add
+                ObjectNode idmOp = createIdmOperation("add", path, value);
+                if (idmOp != null) {
+                    operations.add(idmOp);
+                }
+            }
         }
 
-        // BEGIN: Special handling for members attribute on Group resources
-        if (isMembersPath(path)) {
-            operations.addAll(convertMembersAddOperation(value));
-            return operations;
-        }
-        // END: Special handling for members attribute on Group resources
-
-        // Standard attribute handling
-        ObjectNode idmOp = objectMapper.createObjectNode();
-        idmOp.put("operation", "add");
-
-        // Map SCIM path to PingIDM field
-        String idmField = mapScimPathToIdmField(path);
-        idmOp.put("field", "/" + idmField);
-
-        // Convert value based on attribute type
-        JsonNode idmValue = convertValue(path, value);
-        idmOp.set("value", idmValue);
-
-        operations.add(idmOp);
         return operations;
     }
-    // END: Changed return type and signature to support multiple operations for members
 
     /**
      * Convert SCIM "replace" operation to PingIDM format.
      */
-    // BEGIN: Changed return type and signature to support multiple operations for members
     private List<ObjectNode> convertReplaceOperation(String path, JsonNode value)
             throws FilterTranslationException {
         List<ObjectNode> operations = new ArrayList<>();
 
+        // If path is null, value is an object with attribute names as keys
         if (path == null || path.isEmpty()) {
-            throw new FilterTranslationException("'replace' operation requires a path");
+            if (value == null || !value.isObject()) {
+                throw new FilterTranslationException("'replace' operation without path requires object value");
+            }
+
+            // Iterate through each attribute in the value
+            value.fields().forEachRemaining(entry -> {
+                String attrPath = entry.getKey();
+                JsonNode attrValue = entry.getValue();
+
+                // Check if this is members (Group)
+                if ("members".equalsIgnoreCase(attrPath) && "Group".equalsIgnoreCase(resourceType)) {
+                    try {
+                        operations.addAll(convertMembersReplaceOperation(attrValue));
+                    } catch (FilterTranslationException e) {
+                        LOGGER.severe("Failed to convert members replace: " + e.getMessage());
+                    }
+                } else {
+                    ObjectNode idmOp = createIdmOperation("replace", attrPath, attrValue);
+                    if (idmOp != null) {
+                        operations.add(idmOp);
+                    }
+                }
+            });
+        } else {
+            // Path is specified
+            if ("members".equalsIgnoreCase(path) && "Group".equalsIgnoreCase(resourceType)) {
+                operations.addAll(convertMembersReplaceOperation(value));
+            } else {
+                ObjectNode idmOp = createIdmOperation("replace", path, value);
+                if (idmOp != null) {
+                    operations.add(idmOp);
+                }
+            }
         }
-        if (value == null) {
-            throw new FilterTranslationException("'replace' operation requires a value");
-        }
 
-        // BEGIN: Special handling for members attribute on Group resources
-        if (isMembersPath(path)) {
-            operations.addAll(convertMembersReplaceOperation(value));
-            return operations;
-        }
-        // END: Special handling for members attribute on Group resources
-
-        ObjectNode idmOp = objectMapper.createObjectNode();
-        idmOp.put("operation", "replace");
-
-        // Map SCIM path to PingIDM field
-        String idmField = mapScimPathToIdmField(path);
-        idmOp.put("field", "/" + idmField);
-
-        // Convert value based on attribute type
-        JsonNode idmValue = convertValue(path, value);
-        idmOp.set("value", idmValue);
-
-        operations.add(idmOp);
         return operations;
     }
-    // END: Changed return type and signature to support multiple operations for members
 
     /**
      * Convert SCIM "remove" operation to PingIDM format.
      */
-    // BEGIN: Changed return type and signature to support multiple operations for members
     private List<ObjectNode> convertRemoveOperation(String path, JsonNode value)
             throws FilterTranslationException {
         List<ObjectNode> operations = new ArrayList<>();
@@ -283,149 +321,135 @@ public class ScimPatchConverter {
             throw new FilterTranslationException("'remove' operation requires a path");
         }
 
-        // BEGIN: Special handling for members attribute on Group resources
-        if (isMembersPath(path)) {
+        // Check if this is a members remove operation for Groups
+        if (path.toLowerCase().startsWith("members") && "Group".equalsIgnoreCase(resourceType)) {
             operations.addAll(convertMembersRemoveOperation(path, value));
-            return operations;
+        } else {
+            // Standard attribute remove
+            ObjectNode idmOp = createIdmOperation("remove", path, null);
+            if (idmOp != null) {
+                operations.add(idmOp);
+            }
         }
-        // END: Special handling for members attribute on Group resources
 
-        ObjectNode idmOp = objectMapper.createObjectNode();
-        idmOp.put("operation", "remove");
-
-        // Map SCIM path to PingIDM field
-        String idmField = mapScimPathToIdmField(path);
-        idmOp.put("field", "/" + idmField);
-
-        operations.add(idmOp);
         return operations;
     }
-    // END: Changed return type and signature to support multiple operations for members
 
-    // BEGIN: Add members-specific conversion methods
     /**
-     * Check if the path refers to the members attribute.
+     * Create a single PingIDM operation.
      *
-     * @param path the SCIM path
-     * @return true if this is a members path
+     * @param operation the operation type (add, replace, remove)
+     * @param scimPath the SCIM path
+     * @param value the value (may be null for remove)
+     * @return PingIDM operation node
      */
-    private boolean isMembersPath(String path) {
-        if (path == null) {
-            return false;
+    private ObjectNode createIdmOperation(String operation, String scimPath, JsonNode value) {
+        String idmField = mapScimPathToIdmField(scimPath);
+
+        if (idmField == null || idmField.isEmpty()) {
+            LOGGER.warning("Could not map SCIM path to PingIDM field: " + scimPath);
+            return null;
         }
-        String normalizedPath = path.toLowerCase().trim();
-        return "Group".equalsIgnoreCase(resourceType) &&
-                (normalizedPath.equals("members") ||
-                        normalizedPath.startsWith("members.") ||
-                        normalizedPath.startsWith("members["));
+
+        ObjectNode idmOp = objectMapper.createObjectNode();
+        idmOp.put("operation", operation);
+        idmOp.put("field", "/" + idmField);
+
+        if (value != null && !"remove".equalsIgnoreCase(operation)) {
+            // Convert value if needed
+            JsonNode convertedValue = convertValue(scimPath, value);
+            idmOp.set("value", convertedValue);
+        }
+
+        LOGGER.fine("Created PingIDM operation: " + operation + " " + idmField);
+        return idmOp;
     }
 
     /**
      * Convert SCIM members add operation to PingIDM format.
-     * Creates individual operations for each member with _ref format.
      *
-     * SCIM input: {"op": "add", "path": "members", "value": [{"value": "user-123"}]}
-     * PingIDM output: [{"operation": "add", "field": "/members/-", "value": {"_ref": "managed/alpha_user/user-123"}}]
-     *
-     * @param value the SCIM members value (array of member objects)
-     * @return list of PingIDM operations
+     * @param membersValue the SCIM members value
+     * @return list of PingIDM add operations
      */
-    private List<ObjectNode> convertMembersAddOperation(JsonNode value) throws FilterTranslationException {
+    private List<ObjectNode> convertMembersAddOperation(JsonNode membersValue) throws FilterTranslationException {
         List<ObjectNode> operations = new ArrayList<>();
 
-        if (value.isArray()) {
-            // Multiple members: create one operation per member
-            for (JsonNode member : value) {
-                ObjectNode idmOp = createMemberAddOperation(member);
-                if (idmOp != null) {
+        if (membersValue == null) {
+            return operations;
+        }
+
+        // Handle array of members
+        if (membersValue.isArray()) {
+            for (JsonNode member : membersValue) {
+                String userId = extractMemberValue(member);
+                if (userId != null && !userId.isEmpty()) {
+                    ObjectNode idmOp = createMemberAddOperation(userId);
                     operations.add(idmOp);
                 }
             }
-        } else if (value.isObject()) {
+        } else if (membersValue.isObject()) {
             // Single member object
-            ObjectNode idmOp = createMemberAddOperation(value);
-            if (idmOp != null) {
+            String userId = extractMemberValue(membersValue);
+            if (userId != null && !userId.isEmpty()) {
+                ObjectNode idmOp = createMemberAddOperation(userId);
                 operations.add(idmOp);
             }
-        } else {
-            throw new FilterTranslationException("members value must be an array or object");
         }
 
-        LOGGER.info("Converted " + operations.size() + " member add operations to PingIDM _ref format");
+        LOGGER.info("Converted " + operations.size() + " member add operations to PingIDM format");
         return operations;
     }
 
     /**
      * Create a single PingIDM add operation for a member.
      *
-     * @param member the SCIM member object (e.g., {"value": "user-123"})
-     * @return PingIDM operation with _ref format
+     * @param userId the user ID to add
+     * @return PingIDM add operation
      */
-    private ObjectNode createMemberAddOperation(JsonNode member) throws FilterTranslationException {
-        String userId = extractMemberValue(member);
-        if (userId == null || userId.isEmpty()) {
-            LOGGER.warning("Skipping member with empty value");
-            return null;
-        }
-
+    private ObjectNode createMemberAddOperation(String userId) {
         ObjectNode idmOp = objectMapper.createObjectNode();
         idmOp.put("operation", "add");
-        // Use "/-" suffix for JSON Pointer array append
-        idmOp.put("field", "/members/-");
+        idmOp.put("field", "/members/-"); // Append to array
 
-        // Create _ref value object
+        // Create _ref value
         ObjectNode refValue = objectMapper.createObjectNode();
         refValue.put("_ref", buildMemberRef(userId));
         idmOp.set("value", refValue);
 
-        LOGGER.fine("Created member add operation: " + idmOp.toString());
         return idmOp;
     }
 
     /**
      * Convert SCIM members replace operation to PingIDM format.
-     * Replaces entire members array with new _ref formatted values.
      *
-     * SCIM input: {"op": "replace", "path": "members", "value": [{"value": "user-123"}, {"value": "user-456"}]}
-     * PingIDM output: [{"operation": "replace", "field": "/members", "value": [{"_ref": "managed/alpha_user/user-123"}, ...]}]
-     *
-     * @param value the SCIM members value
-     * @return list containing single replace operation
+     * @param membersValue the new members array
+     * @return list of PingIDM operations (single replace with all members)
      */
-    private List<ObjectNode> convertMembersReplaceOperation(JsonNode value) throws FilterTranslationException {
+    private List<ObjectNode> convertMembersReplaceOperation(JsonNode membersValue) throws FilterTranslationException {
         List<ObjectNode> operations = new ArrayList<>();
 
         ObjectNode idmOp = objectMapper.createObjectNode();
         idmOp.put("operation", "replace");
         idmOp.put("field", "/members");
 
-        // Build array of _ref objects
-        ArrayNode refArray = objectMapper.createArrayNode();
+        // Convert all members to _ref format
+        ArrayNode idmMembers = objectMapper.createArrayNode();
 
-        if (value.isArray()) {
-            for (JsonNode member : value) {
+        if (membersValue != null && membersValue.isArray()) {
+            for (JsonNode member : membersValue) {
                 String userId = extractMemberValue(member);
                 if (userId != null && !userId.isEmpty()) {
                     ObjectNode refValue = objectMapper.createObjectNode();
                     refValue.put("_ref", buildMemberRef(userId));
-                    refArray.add(refValue);
+                    idmMembers.add(refValue);
                 }
             }
-        } else if (value.isObject()) {
-            String userId = extractMemberValue(value);
-            if (userId != null && !userId.isEmpty()) {
-                ObjectNode refValue = objectMapper.createObjectNode();
-                refValue.put("_ref", buildMemberRef(userId));
-                refArray.add(refValue);
-            }
-        } else {
-            throw new FilterTranslationException("members value must be an array or object");
         }
 
-        idmOp.set("value", refArray);
+        idmOp.set("value", idmMembers);
         operations.add(idmOp);
 
-        LOGGER.info("Converted members replace operation with " + refArray.size() + " members to PingIDM _ref format");
+        LOGGER.info("Converted members replace operation with " + idmMembers.size() + " members");
         return operations;
     }
 
@@ -568,11 +592,11 @@ public class ScimPatchConverter {
     private String buildMemberRef(String userId) {
         return "managed/" + managedUserObjectName + "/" + userId;
     }
-    // END: Add members-specific conversion methods
 
     /**
      * Map SCIM path to PingIDM field name.
      * Handles both simple paths (e.g., "active") and complex paths (e.g., "name.givenName").
+     * Also handles Enterprise User extension paths (e.g., "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department").
      *
      * @param scimPath the SCIM path
      * @return the PingIDM field name
@@ -585,6 +609,20 @@ public class ScimPatchConverter {
         // Remove leading slash if present (SCIM paths may or may not have it)
         String path = scimPath.startsWith("/") ? scimPath.substring(1) : scimPath;
 
+        // BEGIN: Handle Enterprise User extension paths
+        // E.g., "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:employeeNumber"
+        if (path.startsWith(ENTERPRISE_USER_SCHEMA + ":")) {
+            String attrName = path.substring(ENTERPRISE_USER_SCHEMA.length() + 1);
+            String customMapping = lookupCustomMapping(attrName, true);
+            if (customMapping != null) {
+                LOGGER.info("Mapped Enterprise extension path '" + path + "' to PingIDM field '" + customMapping + "'");
+                return customMapping;
+            }
+            // Fall through to standard mapping if no custom mapping found
+            path = attrName;
+        }
+        // END: Handle Enterprise User extension paths
+
         // Handle filter expressions in path (e.g., "emails[type eq \"work\"].value")
         // For now, we'll strip the filter and just use the base attribute
         if (path.contains("[")) {
@@ -596,9 +634,57 @@ public class ScimPatchConverter {
             return mapped;
         }
 
-        // Use attribute mapping, or pass through if not found
+        // BEGIN: Check custom mappings first for User resource
+        if ("User".equalsIgnoreCase(resourceType)) {
+            String customMapping = lookupCustomMapping(path, false);
+            if (customMapping != null) {
+                LOGGER.info("Mapped custom attribute '" + path + "' to PingIDM field '" + customMapping + "'");
+                return customMapping;
+            }
+
+            // Handle nested paths like name.middleName
+            if (path.contains(".")) {
+                customMapping = lookupCustomMapping(path, false);
+                if (customMapping != null) {
+                    LOGGER.info("Mapped nested custom attribute '" + path + "' to PingIDM field '" + customMapping + "'");
+                    return customMapping;
+                }
+            }
+        }
+        // END: Check custom mappings
+
+        // Use standard attribute mapping, or pass through if not found
         return attributeMappings.getOrDefault(path, path);
     }
+
+    // BEGIN: Add helper method for custom mapping lookup
+    /**
+     * Look up a custom mapping for a SCIM attribute path.
+     *
+     * @param scimPath the SCIM attribute path (e.g., "title", "name.middleName", "employeeNumber")
+     * @param isEnterpriseAttr true if this is an enterprise extension attribute
+     * @return the PingIDM attribute name, or null if no custom mapping found
+     */
+    private String lookupCustomMapping(String scimPath, boolean isEnterpriseAttr) {
+        if (customMappingConfig == null || !customMappingConfig.hasCustomMappings()) {
+            return null;
+        }
+
+        Optional<CustomAttributeMapping> mapping = customMappingConfig.getByScimPath(scimPath);
+
+        if (mapping.isPresent()) {
+            CustomAttributeMapping m = mapping.get();
+            // Verify it's the right type (enterprise vs core)
+            if (isEnterpriseAttr && m.isEnterpriseExtension()) {
+                return m.getPingIdmAttribute();
+            } else if (!isEnterpriseAttr && !m.isEnterpriseExtension()) {
+                return m.getPingIdmAttribute();
+            }
+        }
+
+        return null;
+    }
+    // END: Add helper method for custom mapping lookup
 
     /**
      * Convert SCIM value to PingIDM format based on attribute type.

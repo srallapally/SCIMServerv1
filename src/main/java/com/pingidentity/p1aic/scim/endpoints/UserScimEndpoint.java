@@ -6,14 +6,10 @@ import com.pingidentity.p1aic.scim.filter.ScimFilterConverter;
 import com.pingidentity.p1aic.scim.filter.ScimPatchConverter;
 import com.pingidentity.p1aic.scim.exceptions.FilterTranslationException;
 // END: Add imports for filter and patch conversion
-
-// BEGIN: Added imports for SCIM 2.0 compliant ListResponse (RFC 7644 Section 3.4.2)
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-// END: Added imports for SCIM 2.0 compliant ListResponse
-
+// BEGIN: Import CustomAttributeMappingConfig for PATCH operations
+import com.pingidentity.p1aic.scim.config.CustomAttributeMappingConfig;
+import com.pingidentity.p1aic.scim.config.ScimServerConfig;
+// END: Import CustomAttributeMappingConfig
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.ScimException;
 import com.unboundid.scim2.common.exceptions.BadRequestException;
@@ -40,18 +36,20 @@ import java.util.logging.Logger;
 /**
  * JAX-RS endpoint for SCIM 2.0 User resources.
  *
- * Provides CRUD operations and search functionality for users.
- * Path: /scim/v2/Users
+ * <p>Provides CRUD operations and search functionality for users.</p>
+ * <p>Path: /scim/v2/Users</p>
  *
- * Enhancements:
- * - Proper handling of count=0 per RFC 7644 (returns only totalResults)
- * - Uses PingIDM's _countOnly parameter for better performance
- * - Supports attribute projection via attributes/excludedAttributes parameters
+ * <p>MODIFIED: Now integrates with {@link CustomAttributeMappingConfig} to handle
+ * custom attribute mappings in PATCH operations for attributes that PingIDM
+ * doesn't support OOTB (e.g., Enterprise User extension attributes).</p>
  *
- * SCIM 2.0 COMPLIANCE FIXES (RFC 7643 / RFC 7644):
- * - ListResponse built manually to avoid invalid root attributes (id, externalId, meta)
- *   per RFC 7644 Section 3.4.2
- * - ObjectMapper configured to exclude null values per RFC 7643 Section 2.5
+ * <p>Enhancements:</p>
+ * <ul>
+ *   <li>Proper handling of count=0 per RFC 7644 (returns only totalResults)</li>
+ *   <li>Uses PingIDM's _countOnly parameter for better performance</li>
+ *   <li>Supports attribute projection via attributes/excludedAttributes parameters</li>
+ *   <li>Custom attribute mapping support for PATCH operations</li>
+ * </ul>
  */
 @Path("/Users")
 @Produces({"application/scim+json", "application/json"})
@@ -65,32 +63,47 @@ public class UserScimEndpoint {
     private static final int DEFAULT_COUNT = 100;
     private static final int MAX_COUNT = 1000;
 
-    // BEGIN: SCIM 2.0 Compliance - ListResponse schema URN (RFC 7644 Section 3.4.2)
-    private static final String LIST_RESPONSE_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
-    // END: SCIM 2.0 Compliance
-
     @Inject
     private PingIdmUserService userService;
 
-    // BEGIN: Add filter and patch converters
+    // BEGIN: Inject CustomAttributeMappingConfig for PATCH operations
+    @Inject
+    private CustomAttributeMappingConfig customMappingConfig;
+    // END: Inject CustomAttributeMappingConfig
+
     private final ScimFilterConverter filterConverter;
-    private final ScimPatchConverter patchConverter;
-    // END: Add filter and patch converters
+    // BEGIN: Change patchConverter to be lazily initialized with custom mappings
+    private ScimPatchConverter patchConverter;
+    // END: Change patchConverter initialization
 
-    // BEGIN: Added ObjectMapper for SCIM 2.0 compliant JSON serialization
-    private final ObjectMapper objectMapper;
-    // END: Added ObjectMapper
-
-    // BEGIN: Add constructor to initialize converters and ObjectMapper
     public UserScimEndpoint() {
         this.filterConverter = new ScimFilterConverter();
-        this.patchConverter = new ScimPatchConverter("User");
-        this.objectMapper = new ObjectMapper();
-        // BEGIN: SCIM 2.0 Compliance - Exclude null values (RFC 7643 Section 2.5)
-        this.objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        // END: SCIM 2.0 Compliance
+        // BEGIN: Defer patchConverter initialization to allow injection
+        // patchConverter will be initialized lazily when first needed
+        this.patchConverter = null;
+        // END: Defer patchConverter initialization
     }
-    // END: Add constructor to initialize converters and ObjectMapper
+
+    // BEGIN: Add lazy initialization method for patchConverter
+    /**
+     * Get the PATCH converter, initializing it with custom mappings if available.
+     * This allows the converter to use injected CustomAttributeMappingConfig.
+     *
+     * @return the initialized ScimPatchConverter
+     */
+    private ScimPatchConverter getPatchConverter() {
+        if (patchConverter == null) {
+            String managedUserObject = ScimServerConfig.getInstance().getManagedUserObjectName();
+            if (managedUserObject == null || managedUserObject.isEmpty()) {
+                managedUserObject = "alpha_user";
+            }
+            // Initialize with custom mapping config if available
+            patchConverter = new ScimPatchConverter("User", managedUserObject, customMappingConfig);
+            LOGGER.info("Initialized ScimPatchConverter with custom mapping support");
+        }
+        return patchConverter;
+    }
+    // END: Add lazy initialization method for patchConverter
 
     /**
      * Search/List users.
@@ -110,7 +123,7 @@ public class UserScimEndpoint {
             @QueryParam("startIndex") Integer startIndex,
             @QueryParam("count") Integer count,
             @QueryParam("attributes") String attributes,
-            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException{
+            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException {
 
         // Apply default startIndex
         int start = (startIndex != null && startIndex > 0) ? startIndex : DEFAULT_START_INDEX;
@@ -132,7 +145,7 @@ public class UserScimEndpoint {
         LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d, attributes=%s, excludedAttributes=%s",
                 filter, start, pageSize, attributes, excludedAttributes));
 
-        // BEGIN: Convert SCIM filter to PingIDM query filter
+        // Convert SCIM filter to PingIDM query filter
         String queryFilter = null;
         if (filter != null && !filter.trim().isEmpty()) {
             try {
@@ -143,7 +156,6 @@ public class UserScimEndpoint {
                 throw new BadRequestException("Invalid filter expression: " + e.getMessage());
             }
         }
-        // END: Convert SCIM filter to PingIDM query filter
 
         // Convert SCIM attributes to PingIDM fields
         String idmFields = convertScimAttributesToIdmFields(attributes, excludedAttributes);
@@ -152,13 +164,7 @@ public class UserScimEndpoint {
         ListResponse<GenericScimResource> listResponse =
                 userService.searchUsers(queryFilter, start, pageSize, idmFields);
 
-        // BEGIN: SCIM 2.0 Compliant ListResponse (RFC 7644 Section 3.4.2)
-        // Convert service ListResponse to compliant ObjectNode to avoid invalid root attributes
-        // (id, externalId, meta) that the UnboundID SDK's ListResponse may include.
-        ObjectNode responseNode = buildCompliantListResponse(listResponse);
-        // END: SCIM 2.0 Compliant ListResponse
-
-        return Response.ok(responseNode).build();
+        return Response.ok(listResponse).build();
     }
 
     /**
@@ -176,7 +182,7 @@ public class UserScimEndpoint {
     public Response getUser(
             @PathParam("id") String id,
             @QueryParam("attributes") String attributes,
-            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException{
+            @QueryParam("excludedAttributes") String excludedAttributes) throws ScimException {
 
         LOGGER.info("Getting user: " + id);
 
@@ -199,7 +205,7 @@ public class UserScimEndpoint {
      * @return the created user resource
      */
     @POST
-    public Response createUser(GenericScimResource user) throws ScimException{
+    public Response createUser(GenericScimResource user) throws ScimException {
 
         LOGGER.info("Creating user");
 
@@ -208,9 +214,7 @@ public class UserScimEndpoint {
 
         // Extract user ID for Location header
         String userId = extractUserId(createdUser);
-        // BEGIN: Use UriBuilder instead of string concatenation for Location header
         String location = jakarta.ws.rs.core.UriBuilder.fromPath("/Users").path(userId).build().toString();
-        // END: Use UriBuilder instead of string concatenation for Location header
 
         // Return 201 Created with Location header
         return Response.status(Response.Status.CREATED)
@@ -234,7 +238,7 @@ public class UserScimEndpoint {
     public Response updateUser(
             @PathParam("id") String id,
             GenericScimResource user,
-            @HeaderParam("If-Match") String ifMatch) throws ScimException{
+            @HeaderParam("If-Match") String ifMatch) throws ScimException {
         LOGGER.info("Updating user: " + id);
         // Extract revision from If-Match header (may be in quotes)
         String revision = extractRevision(ifMatch);
@@ -250,7 +254,7 @@ public class UserScimEndpoint {
      * PATCH /Users/{id}
      *
      * @param id the user ID
-     * @param patchRequest the SCIM patch request
+     * @param patchRequest the SCIM PATCH request body
      * @param ifMatch the If-Match header for optimistic locking (optional)
      * @return the patched user resource
      */
@@ -266,16 +270,16 @@ public class UserScimEndpoint {
         // Extract revision from If-Match header
         String revision = extractRevision(ifMatch);
 
-        // BEGIN: Parse and convert SCIM patch operations to PingIDM format
+        // BEGIN: Use lazy-initialized patchConverter with custom mappings
         String idmPatchOperations;
         try {
-            idmPatchOperations = patchConverter.convert(patchRequest);
+            idmPatchOperations = getPatchConverter().convert(patchRequest);
             LOGGER.info("Converted SCIM PATCH to PingIDM format for user: " + id);
         } catch (FilterTranslationException e) {
             LOGGER.severe("Failed to convert SCIM PATCH operations: " + e.getMessage());
             throw new BadRequestException("Invalid PATCH request: " + e.getMessage());
         }
-        // END: Parse and convert SCIM patch operations to PingIDM format
+        // END: Use lazy-initialized patchConverter
 
         // Call service to patch user
         GenericScimResource patchedUser = userService.patchUser(id, idmPatchOperations, revision);
@@ -306,56 +310,6 @@ public class UserScimEndpoint {
         userService.deleteUser(id, revision);
         // Return 204 No Content
         return Response.noContent().build();
-    }
-
-    /**
-     * Build a SCIM 2.0 compliant ListResponse from service response.
-     *
-     * Per RFC 7644 Section 3.4.2, a ListResponse is a message wrapper (not a resource)
-     * and must only contain the following attributes:
-     * - schemas (required): ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
-     * - totalResults (required): Total number of results matching the query
-     * - Resources (optional): Array of returned resources
-     * - startIndex (optional): 1-based index of first result in current page
-     * - itemsPerPage (optional): Number of resources returned in current page
-     *
-     * It must NOT contain id, externalId, or meta at the root level.
-     *
-     * @param serviceResponse the ListResponse from the service layer
-     * @return ObjectNode representing the compliant ListResponse
-     */
-    private ObjectNode buildCompliantListResponse(ListResponse<GenericScimResource> serviceResponse) {
-        ObjectNode responseNode = objectMapper.createObjectNode();
-
-        // schemas (required) - must be ListResponse schema
-        ArrayNode schemasArray = objectMapper.createArrayNode();
-        schemasArray.add(LIST_RESPONSE_SCHEMA);
-        responseNode.set("schemas", schemasArray);
-
-        // totalResults (required)
-        responseNode.put("totalResults", serviceResponse.getTotalResults());
-
-        // startIndex (optional but included for pagination)
-        if (serviceResponse.getStartIndex() != null) {
-            responseNode.put("startIndex", serviceResponse.getStartIndex());
-        }
-
-        // itemsPerPage (optional but included for pagination)
-        if (serviceResponse.getItemsPerPage() != null) {
-            responseNode.put("itemsPerPage", serviceResponse.getItemsPerPage());
-        }
-
-        // Resources (optional) - array of returned resources
-        List<GenericScimResource> resources = serviceResponse.getResources();
-        if (resources != null && !resources.isEmpty()) {
-            ArrayNode resourcesArray = objectMapper.createArrayNode();
-            for (GenericScimResource resource : resources) {
-                resourcesArray.add(resource.getObjectNode());
-            }
-            responseNode.set("Resources", resourcesArray);
-        }
-
-        return responseNode;
     }
 
     /**
@@ -393,11 +347,10 @@ public class UserScimEndpoint {
             if (!idmFields.contains("_rev")) {
                 idmFields.add("_rev");
             }
-            // BEGIN: Always include userName - required attribute per RFC 7643 Section 4.1
+            // Always include userName - required attribute per RFC 7643 Section 4.1
             if (!idmFields.contains("userName")) {
                 idmFields.add("userName");
             }
-            // END: Always include userName - required attribute per RFC 7643 Section 4.1
 
             return String.join(",", idmFields);
         }
@@ -480,7 +433,56 @@ public class UserScimEndpoint {
         return revision;
     }
 
-    // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
-    // ScimExceptionMapper handles all error response formatting
-    // END: Removed buildErrorResponse and escapeJson methods
+    /**
+     * Build error response from ScimException.
+     */
+    private Response buildErrorResponse(ScimException e) {
+        int statusCode = e.getScimError() != null ?
+                e.getScimError().getStatus() : Response.Status.BAD_REQUEST.getStatusCode();
+
+        String errorResponse = String.format(
+                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
+                        "\"status\":\"%d\"," +
+                        "\"detail\":\"%s\"}",
+                statusCode,
+                escapeJson(e.getMessage())
+        );
+
+        return Response.status(statusCode)
+                .entity(errorResponse)
+                .type("application/scim+json")
+                .build();
+    }
+
+    /**
+     * Build error response with custom status and message.
+     */
+    private Response buildErrorResponse(Response.Status status, String message) {
+        String errorResponse = String.format(
+                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
+                        "\"status\":\"%d\"," +
+                        "\"detail\":\"%s\"}",
+                status.getStatusCode(),
+                escapeJson(message)
+        );
+
+        return Response.status(status)
+                .entity(errorResponse)
+                .type("application/scim+json")
+                .build();
+    }
+
+    /**
+     * Escape special characters in JSON strings.
+     */
+    private String escapeJson(String input) {
+        if (input == null) {
+            return "";
+        }
+        return input.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
 }
