@@ -5,10 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaUrns;
-// BEGIN: Added UriInfo import for dynamic URL resolution
-import jakarta.ws.rs.core.Context;
-import jakarta.ws.rs.core.UriInfo;
-// END: Added UriInfo import for dynamic URL resolution
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
@@ -29,12 +25,6 @@ import java.util.logging.Logger;
  * FIX: Removed GenericScimResource wrapper to avoid null attributes (id, externalId)
  * being added to the response. SCIM 2.0 (RFC 7643) forbids null attribute values.
  * ServiceProviderConfig is a singleton resource and does not require id/externalId.
- *
- * FIX: Added UriInfo to dynamically resolve meta.location from the actual request URL.
- * This ensures the location matches the public URL used by the client, even behind
- * proxies, load balancers, or Cloud Run.
- *
- * FIX: Added required 'id' attribute per RFC 7643 Section 3.1.
  */
 @Path("/ServiceProviderConfig")
 @Produces({"application/scim+json", "application/json"})
@@ -56,6 +46,7 @@ public class ServiceProviderConfigEndpoint {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         // END: Configure ObjectMapper to exclude null values per RFC 7643
+        this.config = ScimServerConfig.getInstance();
     }
 
     /**
@@ -76,7 +67,7 @@ public class ServiceProviderConfigEndpoint {
 
         // BEGIN: Return ObjectNode directly instead of GenericScimResource
         // This avoids the SDK adding null id/externalId attributes
-        ObjectNode spConfig = buildServiceProviderConfig(uriInfo);
+        ObjectNode spConfig = buildServiceProviderConfig();
 
         return Response.ok(spConfig).build();
         // END: Return ObjectNode directly instead of GenericScimResource
@@ -88,12 +79,10 @@ public class ServiceProviderConfigEndpoint {
      *
      * Returns ObjectNode directly to avoid GenericScimResource adding
      * null values for id, externalId which violates RFC 7643.
-     *
-     * @param uriInfo used to construct the canonical meta.location URL
      */
-    // BEGIN: Added UriInfo parameter
-    private ObjectNode buildServiceProviderConfig(UriInfo uriInfo) {
-        // END: Added UriInfo parameter
+    // BEGIN: Changed return type from GenericScimResource to ObjectNode
+    private ObjectNode buildServiceProviderConfig() {
+        // END: Changed return type from GenericScimResource to ObjectNode
         ObjectNode spConfig = objectMapper.createObjectNode();
 
         // Add schemas
