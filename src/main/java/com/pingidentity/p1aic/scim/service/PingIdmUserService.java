@@ -107,6 +107,9 @@ public class PingIdmUserService {
                 ObjectNode scimUserNode = (ObjectNode) scimUser.getObjectNode();
                 customAttributeMapper.applyInboundMappings(idmUser, scimUserNode);
                 LOGGER.info("Applied custom inbound mappings for user creation");
+                // BEGIN: Remove unmapped SCIM attribute names from IDM object
+                removeUnmappedScimAttributes(idmUser);
+                // END: Remove unmapped SCIM attribute names
             }
             // END: Apply custom inbound mappings
 
@@ -114,7 +117,7 @@ public class PingIdmUserService {
             String jsonBody = objectMapper.writeValueAsString(idmUser);
 
             LOGGER.info("Creating user in PingIDM");
-            LOGGER.fine("User JSON: " + jsonBody);
+            LOGGER.info("IDM User JSON being sent to PingIDM: " + jsonBody);
 
             // Call PingIDM create API
             String endpoint = restClient.getManagedUsersEndpoint();
@@ -250,6 +253,9 @@ public class PingIdmUserService {
                 ObjectNode scimUserNode = (ObjectNode) scimUser.getObjectNode();
                 customAttributeMapper.applyInboundMappings(idmUser, scimUserNode);
                 LOGGER.fine("Applied custom inbound mappings for user update: " + userId);
+                // BEGIN: Remove unmapped SCIM attribute names from IDM object
+                removeUnmappedScimAttributes(idmUser);
+                // END: Remove unmapped SCIM attribute names
             }
             // END: Apply custom inbound mappings
 
@@ -699,5 +705,54 @@ public class PingIdmUserService {
         } else {
             throw new BadRequestException(errorMessage + " (HTTP " + statusCode + ")");
         }
+    }
+    /**
+     * Remove unmapped SCIM attribute names from the PingIDM user object.
+     *
+     * <p>This is necessary because UserAttributeMapper.scimToPingIdm() passes through
+     * unknown attributes unchanged. After custom mappings are applied, we need to remove
+     * the original SCIM attribute names to prevent PingIDM from rejecting them.</p>
+     *
+     * @param idmUser the PingIDM user ObjectNode to clean up
+     */
+    private void removeUnmappedScimAttributes(ObjectNode idmUser) {
+        if (customAttributeMapper == null || !customAttributeMapper.hasCustomMappings()) {
+            return;
+        }
+
+        // Get all SCIM paths that are custom-mapped
+        List<String> scimPathsToRemove = new ArrayList<>();
+
+        // Collect Core User attribute paths
+        for (var mapping : customAttributeMapper.getMappingConfig().getCoreUserMappings()) {
+            if (!mapping.isNested()) {
+                scimPathsToRemove.add(mapping.getScimPath());
+            } else {
+                // BEGIN: Handle nested attributes like "middleName" in "name.middleName"
+                // Remove the nested attribute from its parent object
+                String parentPath = mapping.getParentPath();
+                String leafName = mapping.getLeafName();
+
+                JsonNode parentNode = idmUser.get(parentPath);
+                if (parentNode != null && parentNode.isObject()) {
+                    ((ObjectNode) parentNode).remove(leafName);
+                    LOGGER.fine("Removed nested attribute '" + leafName + "' from parent '" + parentPath + "'");
+                }
+                // END: Handle nested attributes
+            }
+        }
+
+        // Collect Enterprise Extension attribute paths
+        for (var mapping : customAttributeMapper.getMappingConfig().getEnterpriseUserMappings()) {
+            scimPathsToRemove.add(mapping.getScimPath());
+        }
+
+        // Remove the SCIM attribute names from IDM object
+        scimPathsToRemove.forEach(idmUser::remove);
+
+        // Also remove the enterprise extension object itself (if present)
+        idmUser.remove("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User");
+
+        LOGGER.fine("Removed " + scimPathsToRemove.size() + " unmapped SCIM attribute names from IDM object");
     }
 }
