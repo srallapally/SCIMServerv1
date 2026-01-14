@@ -33,7 +33,7 @@
     {
       "scimPath": "preferredLanguage",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frUnIndexedString1",
+      "pingIdmAttribute": "frUnindexedString1",
       "type": "string",
       "description": "Indicates the User's preferred written or spoken language. Format: BCP 47 (e.g., 'en-US')",
       "multiValued": false,
@@ -83,7 +83,7 @@
     {
       "scimPath": "employeeNumber",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-      "pingIdmAttribute": "frUnindexedString1",
+      "pingIdmAttribute": "frIndexedString6",
       "type": "string",
       "description": "Numeric or alphanumeric identifier assigned to a person, typically based on order of hire",
       "multiValued": false,
