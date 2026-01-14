@@ -6,6 +6,14 @@ import com.pingidentity.p1aic.scim.filter.ScimFilterConverter;
 import com.pingidentity.p1aic.scim.filter.ScimPatchConverter;
 import com.pingidentity.p1aic.scim.exceptions.FilterTranslationException;
 // END: Add imports for filter and patch conversion
+
+// BEGIN: Added imports for SCIM 2.0 compliant ListResponse (RFC 7644 Section 3.4.2)
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+// END: Added imports for SCIM 2.0 compliant ListResponse
+
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.ScimException;
 import com.unboundid.scim2.common.exceptions.BadRequestException;
@@ -39,6 +47,11 @@ import java.util.logging.Logger;
  * - Proper handling of count=0 per RFC 7644 (returns only totalResults)
  * - Uses PingIDM's _countOnly parameter for better performance
  * - Supports attribute projection via attributes/excludedAttributes parameters
+ *
+ * SCIM 2.0 COMPLIANCE FIXES (RFC 7643 / RFC 7644):
+ * - ListResponse built manually to avoid invalid root attributes (id, externalId, meta)
+ *   per RFC 7644 Section 3.4.2
+ * - ObjectMapper configured to exclude null values per RFC 7643 Section 2.5
  */
 @Path("/Users")
 @Produces({"application/scim+json", "application/json"})
@@ -52,6 +65,10 @@ public class UserScimEndpoint {
     private static final int DEFAULT_COUNT = 100;
     private static final int MAX_COUNT = 1000;
 
+    // BEGIN: SCIM 2.0 Compliance - ListResponse schema URN (RFC 7644 Section 3.4.2)
+    private static final String LIST_RESPONSE_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
+    // END: SCIM 2.0 Compliance
+
     @Inject
     private PingIdmUserService userService;
 
@@ -60,12 +77,20 @@ public class UserScimEndpoint {
     private final ScimPatchConverter patchConverter;
     // END: Add filter and patch converters
 
-    // BEGIN: Add constructor to initialize converters
+    // BEGIN: Added ObjectMapper for SCIM 2.0 compliant JSON serialization
+    private final ObjectMapper objectMapper;
+    // END: Added ObjectMapper
+
+    // BEGIN: Add constructor to initialize converters and ObjectMapper
     public UserScimEndpoint() {
         this.filterConverter = new ScimFilterConverter();
         this.patchConverter = new ScimPatchConverter("User");
+        this.objectMapper = new ObjectMapper();
+        // BEGIN: SCIM 2.0 Compliance - Exclude null values (RFC 7643 Section 2.5)
+        this.objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        // END: SCIM 2.0 Compliance
     }
-    // END: Add constructor to initialize converters
+    // END: Add constructor to initialize converters and ObjectMapper
 
     /**
      * Search/List users.
@@ -127,7 +152,13 @@ public class UserScimEndpoint {
         ListResponse<GenericScimResource> listResponse =
                 userService.searchUsers(queryFilter, start, pageSize, idmFields);
 
-        return Response.ok(listResponse).build();
+        // BEGIN: SCIM 2.0 Compliant ListResponse (RFC 7644 Section 3.4.2)
+        // Convert service ListResponse to compliant ObjectNode to avoid invalid root attributes
+        // (id, externalId, meta) that the UnboundID SDK's ListResponse may include.
+        ObjectNode responseNode = buildCompliantListResponse(listResponse);
+        // END: SCIM 2.0 Compliant ListResponse
+
+        return Response.ok(responseNode).build();
     }
 
     /**
@@ -219,7 +250,7 @@ public class UserScimEndpoint {
      * PATCH /Users/{id}
      *
      * @param id the user ID
-     * @param patchRequest the SCIM patch request (as String for now)
+     * @param patchRequest the SCIM patch request
      * @param ifMatch the If-Match header for optimistic locking (optional)
      * @return the patched user resource
      */
@@ -228,9 +259,10 @@ public class UserScimEndpoint {
     public Response patchUser(
             @PathParam("id") String id,
             String patchRequest,
-            @HeaderParam("If-Match") String ifMatch) throws ScimException{
+            @HeaderParam("If-Match") String ifMatch) throws ScimException {
 
         LOGGER.info("Patching user: " + id);
+
         // Extract revision from If-Match header
         String revision = extractRevision(ifMatch);
 
@@ -274,6 +306,56 @@ public class UserScimEndpoint {
         userService.deleteUser(id, revision);
         // Return 204 No Content
         return Response.noContent().build();
+    }
+
+    /**
+     * Build a SCIM 2.0 compliant ListResponse from service response.
+     *
+     * Per RFC 7644 Section 3.4.2, a ListResponse is a message wrapper (not a resource)
+     * and must only contain the following attributes:
+     * - schemas (required): ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+     * - totalResults (required): Total number of results matching the query
+     * - Resources (optional): Array of returned resources
+     * - startIndex (optional): 1-based index of first result in current page
+     * - itemsPerPage (optional): Number of resources returned in current page
+     *
+     * It must NOT contain id, externalId, or meta at the root level.
+     *
+     * @param serviceResponse the ListResponse from the service layer
+     * @return ObjectNode representing the compliant ListResponse
+     */
+    private ObjectNode buildCompliantListResponse(ListResponse<GenericScimResource> serviceResponse) {
+        ObjectNode responseNode = objectMapper.createObjectNode();
+
+        // schemas (required) - must be ListResponse schema
+        ArrayNode schemasArray = objectMapper.createArrayNode();
+        schemasArray.add(LIST_RESPONSE_SCHEMA);
+        responseNode.set("schemas", schemasArray);
+
+        // totalResults (required)
+        responseNode.put("totalResults", serviceResponse.getTotalResults());
+
+        // startIndex (optional but included for pagination)
+        if (serviceResponse.getStartIndex() != null) {
+            responseNode.put("startIndex", serviceResponse.getStartIndex());
+        }
+
+        // itemsPerPage (optional but included for pagination)
+        if (serviceResponse.getItemsPerPage() != null) {
+            responseNode.put("itemsPerPage", serviceResponse.getItemsPerPage());
+        }
+
+        // Resources (optional) - array of returned resources
+        List<GenericScimResource> resources = serviceResponse.getResources();
+        if (resources != null && !resources.isEmpty()) {
+            ArrayNode resourcesArray = objectMapper.createArrayNode();
+            for (GenericScimResource resource : resources) {
+                resourcesArray.add(resource.getObjectNode());
+            }
+            responseNode.set("Resources", resourcesArray);
+        }
+
+        return responseNode;
     }
 
     /**
@@ -398,56 +480,7 @@ public class UserScimEndpoint {
         return revision;
     }
 
-    /**
-     * Build error response from ScimException.
-     */
-    private Response buildErrorResponse(ScimException e) {
-        int statusCode = e.getScimError() != null ?
-                e.getScimError().getStatus() : Response.Status.BAD_REQUEST.getStatusCode();
-
-        String errorResponse = String.format(
-                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
-                        "\"status\":\"%d\"," +
-                        "\"detail\":\"%s\"}",
-                statusCode,
-                escapeJson(e.getMessage())
-        );
-
-        return Response.status(statusCode)
-                .entity(errorResponse)
-                .type("application/scim+json")
-                .build();
-    }
-
-    /**
-     * Build error response with custom status and message.
-     */
-    private Response buildErrorResponse(Response.Status status, String message) {
-        String errorResponse = String.format(
-                "{\"schemas\":[\"urn:ietf:params:scim:api:messages:2.0:Error\"]," +
-                        "\"status\":\"%d\"," +
-                        "\"detail\":\"%s\"}",
-                status.getStatusCode(),
-                escapeJson(message)
-        );
-
-        return Response.status(status)
-                .entity(errorResponse)
-                .type("application/scim+json")
-                .build();
-    }
-
-    /**
-     * Escape special characters in JSON strings.
-     */
-    private String escapeJson(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
+    // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
+    // ScimExceptionMapper handles all error response formatting
+    // END: Removed buildErrorResponse and escapeJson methods
 }

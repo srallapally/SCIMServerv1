@@ -1,12 +1,18 @@
 package com.pingidentity.p1aic.scim.endpoints;
 
+// BEGIN: Added imports for SCIM 2.0 compliant ListResponse (RFC 7644 Section 3.4.2)
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+// END: Added imports for SCIM 2.0 compliant ListResponse
+
 import com.pingidentity.p1aic.scim.schema.DynamicSchemaManager;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaUrns;
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.ScimException;
 import com.unboundid.scim2.common.exceptions.ResourceNotFoundException;
 import com.unboundid.scim2.common.exceptions.BadRequestException;
-import com.unboundid.scim2.common.messages.ListResponse;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -26,6 +32,11 @@ import java.util.logging.Logger;
  * Path: /scim/v2/Schemas
  *
  * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
+ *
+ * SCIM 2.0 COMPLIANCE FIXES (RFC 7643 / RFC 7644):
+ * - ListResponse built manually to avoid invalid root attributes (id, externalId, meta)
+ *   per RFC 7644 Section 3.4.2
+ * - ObjectMapper configured to exclude null values per RFC 7643 Section 2.5
  */
 @Path("/Schemas")
 @Produces({"application/scim+json", "application/json"})
@@ -33,8 +44,26 @@ public class SchemasEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(SchemasEndpoint.class.getName());
 
+    // BEGIN: SCIM 2.0 Compliance - ListResponse schema URN (RFC 7644 Section 3.4.2)
+    private static final String LIST_RESPONSE_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
+    // END: SCIM 2.0 Compliance
+
+    // BEGIN: Added ObjectMapper for SCIM 2.0 compliant JSON serialization
+    private final ObjectMapper objectMapper;
+    // END: Added ObjectMapper
+
     @Inject
     private DynamicSchemaManager schemaManager;
+
+    /**
+     * Constructor initializes ObjectMapper with SCIM 2.0 compliant settings.
+     */
+    public SchemasEndpoint() {
+        this.objectMapper = new ObjectMapper();
+        // BEGIN: SCIM 2.0 Compliance - Exclude null values (RFC 7643 Section 2.5)
+        this.objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        // END: SCIM 2.0 Compliance
+    }
 
     /**
      * Get all SCIM schemas.
@@ -79,11 +108,14 @@ public class SchemasEndpoint {
         // Get the page of results
         List<GenericScimResource> pageResults = allSchemas.subList(fromIndex, toIndex);
 
-        // Build ListResponse
-        ListResponse<GenericScimResource> listResponse =
-                new ListResponse<>(allSchemas.size(), pageResults, start, pageSize);
+        // BEGIN: SCIM 2.0 Compliant ListResponse (RFC 7644 Section 3.4.2)
+        // Build response manually to avoid invalid root attributes (id, externalId, meta)
+        // that the UnboundID SDK's ListResponse class may include from base class inheritance.
+        // A ListResponse is a message wrapper, NOT a SCIM resource.
+        ObjectNode responseNode = buildListResponse(allSchemas.size(), start, pageSize, pageResults);
+        // END: SCIM 2.0 Compliant ListResponse
 
-        return Response.ok(listResponse).build();
+        return Response.ok(responseNode).build();
         // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
@@ -124,6 +156,53 @@ public class SchemasEndpoint {
 
         return Response.ok(schema).build();
         // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
+    }
+
+    /**
+     * Build a SCIM 2.0 compliant ListResponse.
+     *
+     * Per RFC 7644 Section 3.4.2, a ListResponse is a message wrapper (not a resource)
+     * and must only contain the following attributes:
+     * - schemas (required): ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+     * - totalResults (required): Total number of results matching the query
+     * - Resources (optional): Array of returned resources
+     * - startIndex (optional): 1-based index of first result in current page
+     * - itemsPerPage (optional): Number of resources returned in current page
+     *
+     * It must NOT contain id, externalId, or meta at the root level.
+     *
+     * @param totalResults total number of results
+     * @param startIndex 1-based start index
+     * @param itemsPerPage number of items per page
+     * @param resources list of resources to include
+     * @return ObjectNode representing the compliant ListResponse
+     */
+    private ObjectNode buildListResponse(int totalResults, int startIndex, int itemsPerPage,
+                                         List<GenericScimResource> resources) {
+        ObjectNode responseNode = objectMapper.createObjectNode();
+
+        // schemas (required) - must be ListResponse schema
+        ArrayNode schemasArray = objectMapper.createArrayNode();
+        schemasArray.add(LIST_RESPONSE_SCHEMA);
+        responseNode.set("schemas", schemasArray);
+
+        // totalResults (required)
+        responseNode.put("totalResults", totalResults);
+
+        // startIndex (optional but included for pagination)
+        responseNode.put("startIndex", startIndex);
+
+        // itemsPerPage (optional but included for pagination)
+        responseNode.put("itemsPerPage", itemsPerPage);
+
+        // Resources (optional) - array of returned resources
+        ArrayNode resourcesArray = objectMapper.createArrayNode();
+        for (GenericScimResource resource : resources) {
+            resourcesArray.add(resource.getObjectNode());
+        }
+        responseNode.set("Resources", resourcesArray);
+
+        return responseNode;
     }
 
     /**
