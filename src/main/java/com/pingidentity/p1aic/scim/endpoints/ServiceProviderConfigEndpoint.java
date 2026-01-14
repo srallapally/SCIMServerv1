@@ -1,11 +1,11 @@
 package com.pingidentity.p1aic.scim.endpoints;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaUrns;
-import com.unboundid.scim2.common.GenericScimResource;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
@@ -22,6 +22,10 @@ import java.util.logging.Logger;
  *
  * REFACTORED: Removed try-catch blocks - ScimExceptionMapper handles all exceptions globally
  * Note: This endpoint typically doesn't throw ScimException but kept consistent with other endpoints
+ *
+ * FIX: Removed GenericScimResource wrapper to avoid null attributes (id, externalId)
+ * being added to the response. SCIM 2.0 (RFC 7643) forbids null attribute values.
+ * ServiceProviderConfig is a singleton resource and does not require id/externalId.
  */
 @Path("/ServiceProviderConfig")
 @Produces({"application/scim+json", "application/json"})
@@ -36,7 +40,10 @@ public class ServiceProviderConfigEndpoint {
      * Constructor initializes ObjectMapper and configuration.
      */
     public ServiceProviderConfigEndpoint() {
+        // BEGIN: Configure ObjectMapper to exclude null values per RFC 7643
         this.objectMapper = new ObjectMapper();
+        this.objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        // END: Configure ObjectMapper to exclude null values per RFC 7643
         this.config = ScimServerConfig.getInstance();
     }
 
@@ -53,16 +60,24 @@ public class ServiceProviderConfigEndpoint {
         // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
         LOGGER.info("Getting service provider configuration");
 
-        GenericScimResource spConfig = buildServiceProviderConfig();
+        // BEGIN: Return ObjectNode directly instead of GenericScimResource
+        // This avoids the SDK adding null id/externalId attributes
+        ObjectNode spConfig = buildServiceProviderConfig();
 
         return Response.ok(spConfig).build();
+        // END: Return ObjectNode directly instead of GenericScimResource
         // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
     /**
      * Build the Service Provider Configuration.
+     *
+     * Returns ObjectNode directly to avoid GenericScimResource adding
+     * null values for id, externalId which violates RFC 7643.
      */
-    private GenericScimResource buildServiceProviderConfig() {
+    // BEGIN: Changed return type from GenericScimResource to ObjectNode
+    private ObjectNode buildServiceProviderConfig() {
+        // END: Changed return type from GenericScimResource to ObjectNode
         ObjectNode spConfig = objectMapper.createObjectNode();
 
         // Add schemas
@@ -128,7 +143,9 @@ public class ServiceProviderConfigEndpoint {
         meta.put("location", location);
         spConfig.set("meta", meta);
 
-        return new GenericScimResource(spConfig);
+        // BEGIN: Removed GenericScimResource wrapper - return ObjectNode directly
+        return spConfig;
+        // END: Removed GenericScimResource wrapper - return ObjectNode directly
     }
 
     // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
