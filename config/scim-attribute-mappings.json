@@ -33,7 +33,7 @@
     {
       "scimPath": "preferredLanguage",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "preferredLocale",
+      "pingIdmAttribute": "frUnIndexedString1",
       "type": "string",
       "description": "Indicates the User's preferred written or spoken language. Format: BCP 47 (e.g., 'en-US')",
       "multiValued": false,
