@@ -147,8 +147,4 @@ public class ServiceProviderConfigEndpoint {
         return spConfig;
         // END: Removed GenericScimResource wrapper - return ObjectNode directly
     }
-
-    // BEGIN: Removed buildErrorResponse and escapeJson methods - no longer needed
-    // ScimExceptionMapper handles all error response formatting
-    // END: Removed buildErrorResponse and escapeJson methods
 }
