@@ -45,6 +45,10 @@ public class PingIdmRestClient {
 
     // PingIDM API version
     private static final String API_VERSION_RESOURCE = "resource=1.0";
+    // BEGIN: Add protocol version for count-only queries
+    // PingIDM requires protocol=2.2 for _countOnly=true to work correctly
+    private static final String API_VERSION_PROTOCOL = "protocol=2.2,resource=1.0";
+    // END: Add protocol version for count-only queries
 
     private final Client client;
     private final ScimServerConfig config;
@@ -218,6 +222,63 @@ public class PingIdmRestClient {
 
         return buildRequest(target).get();
     }
+
+    // BEGIN: Add method for count-only queries requiring protocol=2.2 header
+    /**
+     * Execute GET request with query parameters using protocol version header.
+     *
+     * <p>This method is specifically for count-only queries (_countOnly=true) which
+     * require the Accept-API-Version header to include protocol=2.2.</p>
+     *
+     * @param endpointUrl the PingIDM endpoint URL
+     * @param queryParams query parameters as key-value pairs
+     * @return Response from PingIDM
+     */
+    public Response getWithProtocolVersion(String endpointUrl, String... queryParams) {
+        WebTarget target = target(endpointUrl);
+
+        // Add query parameters (expects pairs: key1, value1, key2, value2, ...)
+        for (int i = 0; i < queryParams.length; i += 2) {
+            if (i + 1 < queryParams.length) {
+                target = target.queryParam(queryParams[i], queryParams[i + 1]);
+            }
+        }
+
+        // Build the complete URL for logging
+        String completeUrl = buildCompleteUrl(endpointUrl, queryParams);
+        LOGGER.info("PingIDM GET (protocol=2.2): " + completeUrl);
+
+        // Build request with protocol version header instead of default resource-only header
+        return buildRequestWithProtocolVersion(target).get();
+    }
+
+    /**
+     * Build a request with protocol version header for count-only queries.
+     *
+     * <p>PingIDM requires Accept-API-Version: protocol=2.2,resource=1.0 for
+     * _countOnly=true queries to return accurate total counts.</p>
+     *
+     * @param target the WebTarget to build the request from
+     * @return Invocation.Builder with headers configured
+     */
+    private Invocation.Builder buildRequestWithProtocolVersion(WebTarget target) {
+        Invocation.Builder builder = target.request(MediaType.APPLICATION_JSON);
+
+        // Add PingIDM API version header WITH protocol version for count-only queries
+        builder.header(HEADER_ACCEPT_API_VERSION, API_VERSION_PROTOCOL);
+
+        // Add OAuth Bearer token from request-scoped OAuthContext
+        String token = getCurrentOAuthToken();
+        if (token != null && !token.isEmpty()) {
+            builder.header(HEADER_AUTHORIZATION, "Bearer " + token);
+            LOGGER.fine("Added OAuth Bearer token from OAuthContext to request");
+        } else {
+            LOGGER.warning("No OAuth access token available in OAuthContext for PingIDM request");
+        }
+
+        return builder;
+    }
+    // END: Add method for count-only queries
 
     // BEGIN: Add WebTarget-based helper methods for safe URL construction
     /**

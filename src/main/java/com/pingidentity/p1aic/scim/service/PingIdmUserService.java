@@ -389,6 +389,15 @@ public class PingIdmUserService {
     /**
      * Search/list users from PingIDM with field selection.
      *
+     * <p>This method performs two calls to PingIDM:</p>
+     * <ol>
+     *   <li>A count-only query to get accurate totalResults (required for SCIM compliance)</li>
+     *   <li>A paginated query to get the actual resources</li>
+     * </ol>
+     *
+     * <p>PingIDM requires _countOnly=true with _totalPagedResultsPolicy=EXACT to return
+     * accurate total counts. Without this, PingIDM returns -1 for totalPagedResults.</p>
+     *
      * @param queryFilter the PingIDM query filter (optional)
      * @param startIndex the 1-based start index for pagination
      * @param count the number of results to return (0 for count-only)
@@ -401,12 +410,18 @@ public class PingIdmUserService {
 
         // Handle count=0 (count-only query per RFC 7644)
         if (count == 0) {
-            return searchUsersCountOnly(queryFilter);
+            int totalResults = getTotalCount(queryFilter);
+            return new ListResponse<>(totalResults, new ArrayList<>(), 1, 0);
         }
 
         try {
             LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d, fields=%s",
                     queryFilter, startIndex, count, fields));
+
+            // BEGIN: First get accurate total count via count-only query
+            int totalResults = getTotalCount(queryFilter);
+            LOGGER.info("Count-only query returned totalResults: " + totalResults);
+            // END: Get accurate total count
 
             // BEGIN: Append custom mapped PingIDM fields to ensure they are retrieved
             String enhancedFields = enhanceFieldsWithCustomMappings(fields);
@@ -414,7 +429,7 @@ public class PingIdmUserService {
 
             String endpoint = restClient.getManagedUsersEndpoint();
 
-            // Build query parameters
+            // Build query parameters for resource fetch
             List<String> queryParams = new ArrayList<>();
 
             // Add query filter
@@ -432,10 +447,6 @@ public class PingIdmUserService {
             queryParams.add(String.valueOf(pageOffset));
             queryParams.add("_pageSize");
             queryParams.add(String.valueOf(count));
-
-            // Add total results policy for accurate counts
-            queryParams.add("_totalPagedResultsPolicy");
-            queryParams.add("EXACT");
 
             // Add field selection
             if (enhancedFields != null && !enhancedFields.equals("*")) {
@@ -486,12 +497,9 @@ public class PingIdmUserService {
                 }
             }
 
-            // Extract total count
-            int totalResults = extractTotalCount(resultNode, resources.size());
-
             LOGGER.info("Found " + totalResults + " total users, returning " + resources.size() + " in this page");
 
-            // Build SCIM ListResponse
+            // Build SCIM ListResponse with accurate totalResults from count-only query
             return new ListResponse<>(totalResults, resources, startIndex, count);
 
         } catch (ScimException e) {
@@ -517,18 +525,18 @@ public class PingIdmUserService {
     }
 
     /**
-     * Perform a count-only query using PingIDM's _countOnly parameter.
-     * This is much more efficient than fetching all resources when only the count is needed.
+     * Get the total count of users matching the filter using PingIDM's _countOnly parameter.
      *
-     * Used when SCIM client requests count=0 per RFC 7644.
+     * <p>This is the only reliable way to get accurate total counts from PingIDM.
+     * Without _countOnly=true and _totalPagedResultsPolicy=EXACT, PingIDM returns -1.</p>
      *
-     * @param queryFilter the PingIDM query filter (optional)
-     * @return ListResponse with totalResults populated, empty Resources array
+     * @param queryFilter the PingIDM query filter (optional, null or empty means all users)
+     * @return the total count of matching users
      * @throws ScimException if count query fails
      */
-    private ListResponse<GenericScimResource> searchUsersCountOnly(String queryFilter) throws ScimException {
+    private int getTotalCount(String queryFilter) throws ScimException {
         try {
-            LOGGER.info("Performing count-only query with filter: " + queryFilter);
+            LOGGER.fine("Getting total count with filter: " + queryFilter);
 
             String endpoint = restClient.getManagedUsersEndpoint();
 
@@ -544,11 +552,11 @@ public class PingIdmUserService {
                 queryParams.add("true");
             }
 
-            // Add count-only flag (PingIDM specific)
+            // Add count-only flag (PingIDM specific) - THIS IS REQUIRED for accurate counts
             queryParams.add("_countOnly");
             queryParams.add("true");
 
-            // Add total paged results policy for accuracy
+            // Add total paged results policy for accuracy - THIS IS REQUIRED
             queryParams.add("_totalPagedResultsPolicy");
             queryParams.add("EXACT");
 
@@ -559,10 +567,12 @@ public class PingIdmUserService {
                 if (i > 0) urlBuilder.append("&");
                 urlBuilder.append(queryParams.get(i)).append("=").append(queryParams.get(i + 1));
             }
-            LOGGER.info("PingIDM count-only URL: " + urlBuilder.toString());
+            LOGGER.fine("PingIDM count-only URL: " + urlBuilder.toString());
 
-            // Call PingIDM count API
-            Response response = restClient.get(endpoint, queryParams.toArray(new String[0]));
+            // BEGIN: Use getWithProtocolVersion for count-only queries
+            // PingIDM requires Accept-API-Version: protocol=2.2,resource=1.0 for _countOnly=true
+            Response response = restClient.getWithProtocolVersion(endpoint, queryParams.toArray(new String[0]));
+            // END: Use getWithProtocolVersion for count-only queries
 
             int statusCode = response.getStatus();
             String responseBody = response.readEntity(String.class);
@@ -579,15 +589,8 @@ public class PingIdmUserService {
             // With _countOnly=true, PingIDM returns: {"totalPagedResults": X}
             int totalResults = extractTotalCount(resultNode, 0);
 
-            LOGGER.info("Count-only query returned: " + totalResults + " total users");
-
-            // Return ListResponse with count but no resources (per SCIM spec for count=0)
-            return new ListResponse<>(
-                    totalResults,           // totalResults
-                    new ArrayList<>(),      // Empty resources array
-                    1,                       // startIndex (doesn't matter for count=0)
-                    0                        // itemsPerPage = 0
-            );
+            LOGGER.fine("Count-only query returned: " + totalResults);
+            return totalResults;
 
         } catch (ScimException e) {
             throw e;
@@ -631,16 +634,32 @@ public class PingIdmUserService {
     /**
      * Extract total count from PingIDM response.
      *
+     * <p>PingIDM may return -1 for totalPagedResults when the total count is unknown
+     * (e.g., for large datasets or when _totalPagedResultsPolicy is not EXACT).
+     * Per RFC 7644 Section 3.4.2, totalResults MUST be a non-negative integer,
+     * so we handle the -1 case by using the fallback count.</p>
+     *
      * @param resultNode the PingIDM response JSON
-     * @param fallbackCount fallback count if not found in response
-     * @return the total count
+     * @param fallbackCount fallback count if not found or unknown (-1) in response
+     * @return the total count (always non-negative per SCIM spec)
      */
     private int extractTotalCount(ObjectNode resultNode, int fallbackCount) {
+        // BEGIN: Handle PingIDM's -1 value for unknown total count
         if (resultNode.has("totalPagedResults")) {
-            return resultNode.get("totalPagedResults").asInt();
-        } else if (resultNode.has("resultCount")) {
-            return resultNode.get("resultCount").asInt();
+            int total = resultNode.get("totalPagedResults").asInt();
+            // PingIDM returns -1 when total is unknown; use fallback per RFC 7644 compliance
+            if (total >= 0) {
+                return total;
+            }
+            LOGGER.fine("PingIDM returned totalPagedResults=-1 (unknown), using fallback count");
         }
+        if (resultNode.has("resultCount")) {
+            int total = resultNode.get("resultCount").asInt();
+            if (total >= 0) {
+                return total;
+            }
+        }
+        // END: Handle PingIDM's -1 value
         return fallbackCount;
     }
 

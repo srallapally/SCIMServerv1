@@ -1,6 +1,7 @@
 package com.pingidentity.p1aic.scim;
 import com.pingidentity.p1aic.scim.auth.OAuthContext;
 import com.pingidentity.p1aic.scim.config.CustomAttributeMappingConfig;
+import com.pingidentity.p1aic.scim.config.JacksonConfig;
 import com.pingidentity.p1aic.scim.config.PingIdmConfigService;
 import com.pingidentity.p1aic.scim.mapping.CustomAttributeMapperService;
 import com.pingidentity.p1aic.scim.schema.ScimSchemaBuilder;
@@ -94,6 +95,7 @@ public class ScimServerMain {
             ResourceConfig resourceConfig = new ResourceConfig();
 
             // Register Endpoints
+            resourceConfig.register(com.pingidentity.p1aic.scim.config.JacksonConfig.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.auth.OAuthTokenFilter.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.endpoints.ServiceProviderConfigEndpoint.class);
             resourceConfig.register(com.pingidentity.p1aic.scim.endpoints.SchemasEndpoint.class);
