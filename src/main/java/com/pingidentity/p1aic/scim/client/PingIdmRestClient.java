@@ -139,7 +139,7 @@ public class PingIdmRestClient {
         String token = getCurrentOAuthToken();
         if (token != null && !token.isEmpty()) {
             builder.header(HEADER_AUTHORIZATION, "Bearer " + token);
-            LOGGER.fine("Added OAuth Bearer token from OAuthContext to request");
+            LOGGER.info("Added OAuth Bearer token from OAuthContext to request");
         } else {
             LOGGER.warning("No OAuth access token available in OAuthContext for PingIDM request");
         }
@@ -462,7 +462,7 @@ public class PingIdmRestClient {
     public Response postWithAction(String endpointUrl, String action, String jsonBody) {
         String completeUrl = endpointUrl + "?_action=" + action;
         LOGGER.info("PingIDM POST: " + completeUrl);
-        LOGGER.fine("Request body: " + jsonBody);
+        LOGGER.info("Request body: " + jsonBody);
 
         WebTarget target = target(endpointUrl).queryParam("_action", action);
         return buildRequest(target)

@@ -9,6 +9,7 @@ import com.pingidentity.p1aic.scim.exceptions.FilterTranslationException;
 
 // BEGIN: Added imports for SCIM 2.0 compliant ListResponse (RFC 7644 Section 3.4.2)
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -34,6 +35,7 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -74,6 +76,7 @@ public class GroupScimEndpoint {
     // END: Add filter and patch converters
 
     // BEGIN: Added ObjectMapper for SCIM 2.0 compliant JSON serialization
+    // Also used for manual JSON parsing to bypass SDK validation on custom attributes
     private final ObjectMapper objectMapper;
     // END: Added ObjectMapper
 
@@ -192,29 +195,39 @@ public class GroupScimEndpoint {
      *
      * POST /Groups
      *
-     * @param group the group resource to create
+     * @param groupJson the group resource JSON as String
      * @return the created group resource
      */
     @POST
-    public Response createGroup(GenericScimResource group) throws ScimException {
+    public Response createGroup(String groupJson) throws ScimException {
 
         // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
         LOGGER.info("Creating group");
 
-        // Call service to create role
-        GenericScimResource createdGroup = roleService.createRole(group);
+        try {
+            // BEGIN: Parse JSON directly without SDK validation to support custom attributes
+            ObjectNode groupNode = (ObjectNode) objectMapper.readTree(groupJson);
+            GenericScimResource group = new GenericScimResource(groupNode);
+            // END: Parse JSON directly without SDK validation
 
-        // Extract group ID for Location header
-        String groupId = extractGroupId(createdGroup);
-        // BEGIN: Use UriBuilder instead of string concatenation for Location header
-        String location = jakarta.ws.rs.core.UriBuilder.fromPath("/Groups").path(groupId).build().toString();
-        // END: Use UriBuilder instead of string concatenation for Location header
+            // Call service to create role
+            GenericScimResource createdGroup = roleService.createRole(group);
 
-        // Return 201 Created with Location header
-        return Response.status(Response.Status.CREATED)
-                .header("Location", location)
-                .entity(createdGroup)
-                .build();
+            // Extract group ID for Location header
+            String groupId = extractGroupId(createdGroup);
+            // BEGIN: Use UriBuilder instead of string concatenation for Location header
+            String location = jakarta.ws.rs.core.UriBuilder.fromPath("/Groups").path(groupId).build().toString();
+            // END: Use UriBuilder instead of string concatenation for Location header
+
+            // Return 201 Created with Location header
+            return Response.status(Response.Status.CREATED)
+                    .header("Location", location)
+                    .entity(createdGroup)
+                    .build();
+        } catch (JsonProcessingException e) {
+            LOGGER.log(Level.SEVERE, "Invalid JSON in request", e);
+            throw new BadRequestException("Invalid JSON format: " + e.getMessage());
+        }
         // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
@@ -224,7 +237,7 @@ public class GroupScimEndpoint {
      * PUT /Groups/{id}
      *
      * @param id the group ID
-     * @param group the updated group resource
+     * @param groupJson the updated group resource JSON as String
      * @param ifMatch the If-Match header for optimistic locking (optional)
      * @return the updated group resource
      */
@@ -232,20 +245,30 @@ public class GroupScimEndpoint {
     @Path("/{id}")
     public Response updateGroup(
             @PathParam("id") String id,
-            GenericScimResource group,
+            String groupJson,
             @HeaderParam("If-Match") String ifMatch) throws ScimException {
 
         // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
         LOGGER.info("Updating group: " + id);
 
-        // Extract revision from If-Match header (may be in quotes)
-        String revision = extractRevision(ifMatch);
+        try {
+            // BEGIN: Parse JSON directly without SDK validation to support custom attributes
+            ObjectNode groupNode = (ObjectNode) objectMapper.readTree(groupJson);
+            GenericScimResource group = new GenericScimResource(groupNode);
+            // END: Parse JSON directly without SDK validation
 
-        // Call service to update role
-        GenericScimResource updatedGroup = roleService.updateRole(id, group, revision);
+            // Extract revision from If-Match header (may be in quotes)
+            String revision = extractRevision(ifMatch);
 
-        // Return 200 OK with updated group
-        return Response.ok(updatedGroup).build();
+            // Call service to update role
+            GenericScimResource updatedGroup = roleService.updateRole(id, group, revision);
+
+            // Return 200 OK with updated group
+            return Response.ok(updatedGroup).build();
+        } catch (JsonProcessingException e) {
+            LOGGER.log(Level.SEVERE, "Invalid JSON in request", e);
+            throw new BadRequestException("Invalid JSON format: " + e.getMessage());
+        }
         // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 
@@ -255,7 +278,7 @@ public class GroupScimEndpoint {
      * PATCH /Groups/{id}
      *
      * @param id the group ID
-     * @param patchRequest the SCIM patch request (as String for now)
+     * @param patchJson the SCIM PATCH request JSON as String
      * @param ifMatch the If-Match header for optimistic locking (optional)
      * @return the patched group resource
      */
@@ -263,31 +286,41 @@ public class GroupScimEndpoint {
     @Path("/{id}")
     public Response patchGroup(
             @PathParam("id") String id,
-            String patchRequest,
+            String patchJson,
             @HeaderParam("If-Match") String ifMatch) throws ScimException {
 
         // BEGIN: Removed try-catch - ScimExceptionMapper handles exceptions globally
         LOGGER.info("Patching group: " + id);
 
-        // Extract revision from If-Match header
-        String revision = extractRevision(ifMatch);
-
-        // BEGIN: Parse and convert SCIM patch operations to PingIDM format
-        String idmPatchOperations;
         try {
-            idmPatchOperations = patchConverter.convert(patchRequest);
-            LOGGER.info("Converted SCIM PATCH to PingIDM format for group: " + id);
-        } catch (FilterTranslationException e) {
-            LOGGER.severe("Failed to convert SCIM PATCH operations: " + e.getMessage());
-            throw new BadRequestException("Invalid PATCH request: " + e.getMessage());
+            // BEGIN: Parse JSON directly without SDK validation to support custom attributes
+            ObjectNode patchNode = (ObjectNode) objectMapper.readTree(patchJson);
+            GenericScimResource patchRequest = new GenericScimResource(patchNode);
+            // END: Parse JSON directly without SDK validation
+
+            // Extract revision from If-Match header
+            String revision = extractRevision(ifMatch);
+
+            // BEGIN: Parse and convert SCIM patch operations to PingIDM format
+            String idmPatchOperations;
+            try {
+                idmPatchOperations = patchConverter.convert(patchJson);
+                LOGGER.info("Converted SCIM PATCH to PingIDM format for group: " + id);
+            } catch (FilterTranslationException e) {
+                LOGGER.severe("Failed to convert SCIM PATCH operations: " + e.getMessage());
+                throw new BadRequestException("Invalid PATCH request: " + e.getMessage());
+            }
+            // END: Parse and convert SCIM patch operations to PingIDM format
+
+            // Call service to patch role
+            GenericScimResource patchedGroup = roleService.patchRole(id, idmPatchOperations, revision);
+
+            // Return 200 OK with patched group
+            return Response.ok(patchedGroup).build();
+        } catch (JsonProcessingException e) {
+            LOGGER.log(Level.SEVERE, "Invalid JSON in request", e);
+            throw new BadRequestException("Invalid JSON format: " + e.getMessage());
         }
-        // END: Parse and convert SCIM patch operations to PingIDM format
-
-        // Call service to patch role
-        GenericScimResource patchedGroup = roleService.patchRole(id, idmPatchOperations, revision);
-
-        // Return 200 OK with patched group
-        return Response.ok(patchedGroup).build();
         // END: Removed try-catch - ScimExceptionMapper handles exceptions globally
     }
 

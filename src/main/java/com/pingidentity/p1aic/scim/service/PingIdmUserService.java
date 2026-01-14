@@ -106,7 +106,7 @@ public class PingIdmUserService {
             if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
                 ObjectNode scimUserNode = (ObjectNode) scimUser.getObjectNode();
                 customAttributeMapper.applyInboundMappings(idmUser, scimUserNode);
-                LOGGER.fine("Applied custom inbound mappings for user creation");
+                LOGGER.info("Applied custom inbound mappings for user creation");
             }
             // END: Apply custom inbound mappings
 
@@ -114,6 +114,7 @@ public class PingIdmUserService {
             String jsonBody = objectMapper.writeValueAsString(idmUser);
 
             LOGGER.info("Creating user in PingIDM");
+            LOGGER.fine("User JSON: " + jsonBody);
 
             // Call PingIDM create API
             String endpoint = restClient.getManagedUsersEndpoint();

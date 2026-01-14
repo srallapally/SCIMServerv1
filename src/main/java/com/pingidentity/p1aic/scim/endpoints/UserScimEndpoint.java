@@ -10,6 +10,11 @@ import com.pingidentity.p1aic.scim.exceptions.FilterTranslationException;
 import com.pingidentity.p1aic.scim.config.CustomAttributeMappingConfig;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
 // END: Import CustomAttributeMappingConfig
+// BEGIN: Add Jackson imports for bypassing SDK validation on custom attributes
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+// END: Add Jackson imports for bypassing SDK validation
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.ScimException;
 import com.unboundid.scim2.common.exceptions.BadRequestException;
@@ -70,6 +75,10 @@ public class UserScimEndpoint {
     @Inject
     private CustomAttributeMappingConfig customMappingConfig;
     // END: Inject CustomAttributeMappingConfig
+
+    // BEGIN: Add ObjectMapper for manual JSON parsing to bypass SDK validation
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    // END: Add ObjectMapper for manual JSON parsing
 
     private final ScimFilterConverter filterConverter;
     // BEGIN: Change patchConverter to be lazily initialized with custom mappings
@@ -201,26 +210,37 @@ public class UserScimEndpoint {
      *
      * POST /Users
      *
-     * @param user the user resource to create
+     * @param userJson the user resource JSON as String
      * @return the created user resource
      */
     @POST
-    public Response createUser(GenericScimResource user) throws ScimException {
+    public Response createUser(String userJson) throws ScimException {
 
         LOGGER.info("Creating user");
 
-        // Call service to create user
-        GenericScimResource createdUser = userService.createUser(user);
+        try {
+            // BEGIN: Parse JSON directly without SDK validation to support custom attributes
+            ObjectNode userNode = (ObjectNode) objectMapper.readTree(userJson);
+            LOGGER.info("Parsed user JSON successfully");
+            GenericScimResource user = new GenericScimResource(userNode);
+            // END: Parse JSON directly without SDK validation
 
-        // Extract user ID for Location header
-        String userId = extractUserId(createdUser);
-        String location = jakarta.ws.rs.core.UriBuilder.fromPath("/Users").path(userId).build().toString();
+            // Call service to create user
+            GenericScimResource createdUser = userService.createUser(user);
 
-        // Return 201 Created with Location header
-        return Response.status(Response.Status.CREATED)
-                .header("Location", location)
-                .entity(createdUser)
-                .build();
+            // Extract user ID for Location header
+            String userId = extractUserId(createdUser);
+            String location = jakarta.ws.rs.core.UriBuilder.fromPath("/Users").path(userId).build().toString();
+
+            // Return 201 Created with Location header
+            return Response.status(Response.Status.CREATED)
+                    .header("Location", location)
+                    .entity(createdUser)
+                    .build();
+        } catch (JsonProcessingException e) {
+            LOGGER.log(Level.SEVERE, "Invalid JSON in request", e);
+            throw new BadRequestException("Invalid JSON format: " + e.getMessage());
+        }
     }
 
     /**
@@ -229,7 +249,7 @@ public class UserScimEndpoint {
      * PUT /Users/{id}
      *
      * @param id the user ID
-     * @param user the updated user resource
+     * @param userJson the updated user resource JSON as String
      * @param ifMatch the If-Match header for optimistic locking (optional)
      * @return the updated user resource
      */
@@ -237,15 +257,29 @@ public class UserScimEndpoint {
     @Path("/{id}")
     public Response updateUser(
             @PathParam("id") String id,
-            GenericScimResource user,
+            String userJson,
             @HeaderParam("If-Match") String ifMatch) throws ScimException {
+
         LOGGER.info("Updating user: " + id);
-        // Extract revision from If-Match header (may be in quotes)
-        String revision = extractRevision(ifMatch);
-        // Call service to update user
-        GenericScimResource updatedUser = userService.updateUser(id, user, revision);
-        // Return 200 OK with updated user
-        return Response.ok(updatedUser).build();
+
+        try {
+            // BEGIN: Parse JSON directly without SDK validation to support custom attributes
+            ObjectNode userNode = (ObjectNode) objectMapper.readTree(userJson);
+            GenericScimResource user = new GenericScimResource(userNode);
+            // END: Parse JSON directly without SDK validation
+
+            // Extract revision from If-Match header (may be in quotes)
+            String revision = extractRevision(ifMatch);
+
+            // Call service to update user
+            GenericScimResource updatedUser = userService.updateUser(id, user, revision);
+
+            // Return 200 OK with updated user
+            return Response.ok(updatedUser).build();
+        } catch (JsonProcessingException e) {
+            LOGGER.log(Level.SEVERE, "Invalid JSON in request", e);
+            throw new BadRequestException("Invalid JSON format: " + e.getMessage());
+        }
     }
 
     /**
@@ -254,7 +288,7 @@ public class UserScimEndpoint {
      * PATCH /Users/{id}
      *
      * @param id the user ID
-     * @param patchRequest the SCIM PATCH request body
+     * @param patchJson the SCIM PATCH request JSON as String
      * @param ifMatch the If-Match header for optimistic locking (optional)
      * @return the patched user resource
      */
@@ -262,30 +296,40 @@ public class UserScimEndpoint {
     @Path("/{id}")
     public Response patchUser(
             @PathParam("id") String id,
-            String patchRequest,
+            String patchJson,
             @HeaderParam("If-Match") String ifMatch) throws ScimException {
 
         LOGGER.info("Patching user: " + id);
 
-        // Extract revision from If-Match header
-        String revision = extractRevision(ifMatch);
-
-        // BEGIN: Use lazy-initialized patchConverter with custom mappings
-        String idmPatchOperations;
         try {
-            idmPatchOperations = getPatchConverter().convert(patchRequest);
-            LOGGER.info("Converted SCIM PATCH to PingIDM format for user: " + id);
-        } catch (FilterTranslationException e) {
-            LOGGER.severe("Failed to convert SCIM PATCH operations: " + e.getMessage());
-            throw new BadRequestException("Invalid PATCH request: " + e.getMessage());
+            // BEGIN: Parse JSON directly without SDK validation to support custom attributes
+            ObjectNode patchNode = (ObjectNode) objectMapper.readTree(patchJson);
+            GenericScimResource patchRequest = new GenericScimResource(patchNode);
+            // END: Parse JSON directly without SDK validation
+
+            // Extract revision from If-Match header
+            String revision = extractRevision(ifMatch);
+
+            // BEGIN: Use lazy-initialized patchConverter with custom mappings
+            String idmPatchOperations;
+            try {
+                idmPatchOperations = getPatchConverter().convert(patchJson);
+                LOGGER.info("Converted SCIM PATCH to PingIDM format for user: " + id);
+            } catch (FilterTranslationException e) {
+                LOGGER.severe("Failed to convert SCIM PATCH operations: " + e.getMessage());
+                throw new BadRequestException("Invalid PATCH request: " + e.getMessage());
+            }
+            // END: Use lazy-initialized patchConverter
+
+            // Call service to patch user
+            GenericScimResource patchedUser = userService.patchUser(id, idmPatchOperations, revision);
+
+            // Return 200 OK with patched user
+            return Response.ok(patchedUser).build();
+        } catch (JsonProcessingException e) {
+            LOGGER.log(Level.SEVERE, "Invalid JSON in request", e);
+            throw new BadRequestException("Invalid JSON format: " + e.getMessage());
         }
-        // END: Use lazy-initialized patchConverter
-
-        // Call service to patch user
-        GenericScimResource patchedUser = userService.patchUser(id, idmPatchOperations, revision);
-
-        // Return 200 OK with patched user
-        return Response.ok(patchedUser).build();
     }
 
     /**
