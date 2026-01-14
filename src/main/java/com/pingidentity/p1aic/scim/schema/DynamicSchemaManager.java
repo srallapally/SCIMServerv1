@@ -1,13 +1,18 @@
 package com.pingidentity.p1aic.scim.schema;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.pingidentity.p1aic.scim.config.CustomAttributeMappingConfig;
 import com.pingidentity.p1aic.scim.config.PingIdmConfigService;
 import com.pingidentity.p1aic.scim.config.ScimServerConfig;
+import com.pingidentity.p1aic.scim.mapping.CustomAttributeMapperService;
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.types.AttributeDefinition;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -20,11 +25,14 @@ import java.util.logging.Logger;
 /**
  * Dynamic schema manager that builds and caches SCIM schemas based on PingIDM configuration.
  *
- * This manager fetches PingIDM managed object configuration at startup and builds
+ * <p>This manager fetches PingIDM managed object configuration at startup and builds
  * SCIM schema definitions dynamically, including custom attributes that customers
- * have added to their managed objects.
+ * have added to their managed objects.</p>
  *
- * The schemas are cached for performance and can be refreshed on demand.
+ * <p>MODIFIED: Now integrates with {@link CustomAttributeMapperService} to enhance schemas
+ * with custom-mapped attributes for SCIM 2.0 compliance (e.g., Enterprise User extension).</p>
+ *
+ * <p>The schemas are cached for performance and can be refreshed on demand.</p>
  */
 @Singleton
 public class DynamicSchemaManager {
@@ -37,9 +45,15 @@ public class DynamicSchemaManager {
     @Inject
     private ScimSchemaBuilder schemaBuilder;
 
+    // BEGIN: Added CustomAttributeMapperService injection
+    @Inject
+    private CustomAttributeMapperService customAttributeMapper;
+    // END: Added CustomAttributeMapperService injection
+
     private final ScimServerConfig config;
     private final ReadWriteLock lock;
     private final ObjectMapper objectMapper;
+
     // Cache for SCIM schemas
     private final Map<String, GenericScimResource> schemaCache;
 
@@ -50,7 +64,7 @@ public class DynamicSchemaManager {
     private volatile boolean initialized = false;
 
     /**
-     * Constructor initializes caches and configuration.
+     * Default constructor initializes caches and configuration.
      */
     public DynamicSchemaManager() {
         this.config = ScimServerConfig.getInstance();
@@ -60,10 +74,16 @@ public class DynamicSchemaManager {
         this.objectMapper = new ObjectMapper();
     }
 
+    /**
+     * Constructor with explicit dependencies (for testing or manual instantiation).
+     */
     @Inject
-    public DynamicSchemaManager(PingIdmConfigService configService, ScimSchemaBuilder schemaBuilder) {
+    public DynamicSchemaManager(PingIdmConfigService configService,
+                                ScimSchemaBuilder schemaBuilder,
+                                CustomAttributeMapperService customAttributeMapper) {
         this.configService = configService;
         this.schemaBuilder = schemaBuilder;
+        this.customAttributeMapper = customAttributeMapper;
 
         // Initialize standard fields
         this.config = ScimServerConfig.getInstance();
@@ -72,6 +92,7 @@ public class DynamicSchemaManager {
         this.attributeCache = new HashMap<>();
         this.objectMapper = new ObjectMapper();
     }
+
     /**
      * Initialize schemas on startup.
      * This method is called automatically after dependency injection.
@@ -86,9 +107,8 @@ public class DynamicSchemaManager {
 
             initialized = true;
             LOGGER.info("DynamicSchemaManager initialized successfully");
-            LOGGER.info("Schema count: "+ schemaCache.size());
-            LOGGER.info("Cached schemas: "+ String.join(", ", schemaCache.keySet()));
-            LOGGER.info("DynamicSchemaManager initialized successfully");
+            LOGGER.info("Schema count: " + schemaCache.size());
+            LOGGER.info("Cached schemas: " + String.join(", ", schemaCache.keySet()));
 
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to initialize DynamicSchemaManager", e);
@@ -110,6 +130,14 @@ public class DynamicSchemaManager {
             LOGGER.info("About to build user schema...");
             buildUserSchema(realm);
             LOGGER.info("User schema build completed");
+
+            // BEGIN: Build Enterprise User extension schema if custom mappings exist
+            if (customAttributeMapper != null && customAttributeMapper.hasEnterpriseExtension()) {
+                LOGGER.info("About to build Enterprise User extension schema...");
+                buildEnterpriseUserSchema();
+                LOGGER.info("Enterprise User extension schema build completed");
+            }
+            // END: Build Enterprise User extension schema
 
             // Build Group schema
             LOGGER.info("About to build group schema...");
@@ -143,7 +171,6 @@ public class DynamicSchemaManager {
         if (userConfig == null) {
             LOGGER.warning("User configuration not found for realm: " + realm);
             throw new Exception("User configuration not found for object: " + userObjectName);
-            //return;
         }
 
         // Extract properties definition
@@ -155,8 +182,18 @@ public class DynamicSchemaManager {
             LOGGER.info("Using empty properties for user schema");
         }
         LOGGER.info("Building SCIM User schema with " + properties.size() + " custom properties");
+
         // Build SCIM User schema
         GenericScimResource userSchema = schemaBuilder.buildUserSchema(properties);
+
+        // BEGIN: Enhance schema with custom attribute mappings
+        if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+            LOGGER.info("Enhancing User schema with custom attribute mappings...");
+            ObjectNode schemaNode = (ObjectNode) userSchema.getObjectNode();
+            customAttributeMapper.enhanceUserSchema(schemaNode);
+            LOGGER.info("User schema enhanced with custom mappings");
+        }
+        // END: Enhance schema with custom attribute mappings
 
         // Cache the schema
         schemaCache.put(ScimSchemaUrns.CORE_USER_SCHEMA, userSchema);
@@ -167,6 +204,54 @@ public class DynamicSchemaManager {
 
         LOGGER.info("User schema built with " + attributes.size() + " attributes");
     }
+
+    // BEGIN: New method to build Enterprise User extension schema
+    /**
+     * Build Enterprise User extension schema from custom attribute mappings.
+     *
+     * <p>This schema is only built if enterprise extension attributes are configured
+     * in the custom attribute mappings.</p>
+     */
+    private void buildEnterpriseUserSchema() {
+        LOGGER.info("Building Enterprise User extension schema from custom mappings");
+
+        ObjectNode schemaNode = objectMapper.createObjectNode();
+
+        // Set schema metadata
+        schemaNode.put("id", ScimSchemaUrns.ENTERPRISE_USER_SCHEMA);
+        schemaNode.put("name", "EnterpriseUser");
+        schemaNode.put("description", "Enterprise User Extension");
+
+        // Add schemas array
+        ArrayNode schemas = objectMapper.createArrayNode();
+        schemas.add(ScimSchemaUrns.SCHEMA);
+        schemaNode.set("schemas", schemas);
+
+        // Create empty attributes array - will be populated by enhanceEnterpriseUserSchema
+        ArrayNode attributes = objectMapper.createArrayNode();
+        schemaNode.set("attributes", attributes);
+
+        // Enhance with custom enterprise mappings
+        if (customAttributeMapper != null) {
+            customAttributeMapper.enhanceEnterpriseUserSchema(schemaNode);
+        }
+
+        // Only cache if we have attributes
+        ArrayNode enhancedAttrs = (ArrayNode) schemaNode.get("attributes");
+        if (enhancedAttrs != null && enhancedAttrs.size() > 0) {
+            GenericScimResource enterpriseSchema = new GenericScimResource(schemaNode);
+            schemaCache.put(ScimSchemaUrns.ENTERPRISE_USER_SCHEMA, enterpriseSchema);
+
+            // Extract and cache attribute definitions
+            List<AttributeDefinition> attrDefs = schemaBuilder.extractAttributeDefinitions(enterpriseSchema);
+            attributeCache.put("EnterpriseUser", attrDefs);
+
+            LOGGER.info("Enterprise User schema built with " + enhancedAttrs.size() + " attributes");
+        } else {
+            LOGGER.info("No enterprise extension attributes configured, skipping schema creation");
+        }
+    }
+    // END: New method to build Enterprise User extension schema
 
     /**
      * Build Group schema from PingIDM role configuration.
@@ -269,6 +354,17 @@ public class DynamicSchemaManager {
         return getSchema(ScimSchemaUrns.CORE_GROUP_SCHEMA);
     }
 
+    // BEGIN: New method to get Enterprise User schema
+    /**
+     * Get the Enterprise User extension schema.
+     *
+     * @return the Enterprise User schema resource, or null if not available
+     */
+    public GenericScimResource getEnterpriseUserSchema() {
+        return getSchema(ScimSchemaUrns.ENTERPRISE_USER_SCHEMA);
+    }
+    // END: New method to get Enterprise User schema
+
     /**
      * Check if a schema exists.
      *
@@ -283,6 +379,17 @@ public class DynamicSchemaManager {
             lock.readLock().unlock();
         }
     }
+
+    // BEGIN: New method to check for enterprise extension
+    /**
+     * Check if the Enterprise User extension schema is available.
+     *
+     * @return true if the Enterprise User schema exists
+     */
+    public boolean hasEnterpriseUserSchema() {
+        return hasSchema(ScimSchemaUrns.ENTERPRISE_USER_SCHEMA);
+    }
+    // END: New method to check for enterprise extension
 
     /**
      * Refresh schemas by re-fetching from PingIDM configuration.
@@ -315,7 +422,7 @@ public class DynamicSchemaManager {
      * @return true if initialized, false otherwise
      */
     public boolean isInitialized() {
-        LOGGER.info("isInitialized() called. Instance hashcode: "+System.identityHashCode(this) +
+        LOGGER.fine("isInitialized() called. Instance hashcode: " + System.identityHashCode(this) +
                 " initialized: " + initialized);
         return initialized;
     }

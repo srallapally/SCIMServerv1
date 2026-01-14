@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pingidentity.p1aic.scim.client.PingIdmRestClient;
 import com.pingidentity.p1aic.scim.mapping.UserAttributeMapper;
+// BEGIN: Import CustomAttributeMapperService for custom attribute handling
+import com.pingidentity.p1aic.scim.mapping.CustomAttributeMapperService;
+// END: Import CustomAttributeMapperService
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.BadRequestException;
 import com.unboundid.scim2.common.exceptions.ResourceNotFoundException;
@@ -13,6 +16,7 @@ import com.unboundid.scim2.common.exceptions.ScimException;
 import com.unboundid.scim2.common.messages.ListResponse;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -21,13 +25,20 @@ import java.util.logging.Logger;
 /**
  * Service class for PingIDM managed user operations.
  *
- * This service uses PingIdmRestClient to interact with PingIDM REST APIs
- * and UserAttributeMapper to convert between SCIM User and PingIDM user formats.
+ * <p>This service uses PingIdmRestClient to interact with PingIDM REST APIs
+ * and UserAttributeMapper to convert between SCIM User and PingIDM user formats.</p>
  *
- * Enhancements:
- * - Uses _countOnly=true for count=0 requests (RFC 7644 compliance)
- * - Supports efficient total count retrieval without fetching resources
- * - Supports field selection for optimized data retrieval
+ * <p>MODIFIED: Now integrates with {@link CustomAttributeMapperService} to handle
+ * custom attribute mappings for attributes that PingIDM doesn't support OOTB
+ * (e.g., Enterprise User extension attributes like employeeNumber, department).</p>
+ *
+ * <p>Enhancements:</p>
+ * <ul>
+ *   <li>Uses _countOnly=true for count=0 requests (RFC 7644 compliance)</li>
+ *   <li>Supports efficient total count retrieval without fetching resources</li>
+ *   <li>Supports field selection for optimized data retrieval</li>
+ *   <li>Applies custom attribute mappings for inbound and outbound conversions</li>
+ * </ul>
  */
 public class PingIdmUserService {
 
@@ -35,6 +46,11 @@ public class PingIdmUserService {
 
     @Inject
     private PingIdmRestClient restClient;
+
+    // BEGIN: Inject CustomAttributeMapperService for custom attribute handling
+    @Inject
+    private CustomAttributeMapperService customAttributeMapper;
+    // END: Inject CustomAttributeMapperService
 
     private final UserAttributeMapper attributeMapper;
     private final ObjectMapper objectMapper;
@@ -59,6 +75,21 @@ public class PingIdmUserService {
         this.objectMapper = new ObjectMapper();
     }
 
+    // BEGIN: Constructor with all dependencies for testing
+    /**
+     * Constructor with all dependencies (for testing).
+     *
+     * @param restClient the PingIDM REST client
+     * @param customAttributeMapper the custom attribute mapper service
+     */
+    public PingIdmUserService(PingIdmRestClient restClient, CustomAttributeMapperService customAttributeMapper) {
+        this.restClient = restClient;
+        this.customAttributeMapper = customAttributeMapper;
+        this.attributeMapper = new UserAttributeMapper();
+        this.objectMapper = new ObjectMapper();
+    }
+    // END: Constructor with all dependencies for testing
+
     /**
      * Create a new user in PingIDM.
      *
@@ -70,6 +101,14 @@ public class PingIdmUserService {
         try {
             // Convert SCIM user to PingIDM format
             ObjectNode idmUser = attributeMapper.scimToPingIdm(scimUser);
+
+            // BEGIN: Apply custom inbound mappings (SCIM -> PingIDM)
+            if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+                ObjectNode scimUserNode = (ObjectNode) scimUser.getObjectNode();
+                customAttributeMapper.applyInboundMappings(idmUser, scimUserNode);
+                LOGGER.fine("Applied custom inbound mappings for user creation");
+            }
+            // END: Apply custom inbound mappings
 
             // Convert to JSON string
             String jsonBody = objectMapper.writeValueAsString(idmUser);
@@ -91,10 +130,20 @@ public class PingIdmUserService {
             }
 
             // Parse response body
-            ObjectNode createdUser = (ObjectNode) objectMapper.readTree(responseBody);
+            ObjectNode createdIdmUser = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert back to SCIM format
-            return attributeMapper.pingIdmToScim(createdUser);
+            GenericScimResource scimResult = attributeMapper.pingIdmToScim(createdIdmUser);
+
+            // BEGIN: Apply custom outbound mappings (PingIDM -> SCIM)
+            if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+                ObjectNode scimResultNode = (ObjectNode) scimResult.getObjectNode();
+                customAttributeMapper.applyOutboundMappings(scimResultNode, createdIdmUser);
+                LOGGER.fine("Applied custom outbound mappings for created user");
+            }
+            // END: Apply custom outbound mappings
+
+            return scimResult;
 
         } catch (ScimException e) {
             throw e;
@@ -127,21 +176,19 @@ public class PingIdmUserService {
         try {
             LOGGER.info("Getting user: " + userId + ", fields: " + fields);
 
-            // BEGIN: Use WebTarget-based getResource instead of string concatenation
+            // BEGIN: Append custom mapped PingIDM fields to ensure they are retrieved
+            String enhancedFields = enhanceFieldsWithCustomMappings(fields);
+            // END: Append custom mapped fields
+
             // Build endpoint URL using WebTarget.path() for safe URL construction
             String baseEndpoint = restClient.getManagedUsersEndpoint();
-            // END: Use WebTarget-based getResource instead of string concatenation
 
             // Add fields parameter if specified
             Response response;
-            if (fields != null && !fields.equals("*")) {
-                // BEGIN: Use WebTarget-based getResource with query parameters
-                response = restClient.getResource(baseEndpoint, userId, "_fields", fields);
-                // END: Use WebTarget-based getResource with query parameters
+            if (enhancedFields != null && !enhancedFields.equals("*")) {
+                response = restClient.getResource(baseEndpoint, userId, "_fields", enhancedFields);
             } else {
-                // BEGIN: Use WebTarget-based getResource without query parameters
                 response = restClient.getResource(baseEndpoint, userId);
-                // END: Use WebTarget-based getResource without query parameters
             }
 
             // Read response immediately
@@ -162,7 +209,17 @@ public class PingIdmUserService {
             ObjectNode idmUser = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert to SCIM format
-            return attributeMapper.pingIdmToScim(idmUser);
+            GenericScimResource scimUser = attributeMapper.pingIdmToScim(idmUser);
+
+            // BEGIN: Apply custom outbound mappings (PingIDM -> SCIM)
+            if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+                ObjectNode scimUserNode = (ObjectNode) scimUser.getObjectNode();
+                customAttributeMapper.applyOutboundMappings(scimUserNode, idmUser);
+                LOGGER.fine("Applied custom outbound mappings for user: " + userId);
+            }
+            // END: Apply custom outbound mappings
+
+            return scimUser;
 
         } catch (ScimException e) {
             throw e;
@@ -187,36 +244,28 @@ public class PingIdmUserService {
             // Convert SCIM user to PingIDM format
             ObjectNode idmUser = attributeMapper.scimToPingIdm(scimUser);
 
+            // BEGIN: Apply custom inbound mappings (SCIM -> PingIDM)
+            if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+                ObjectNode scimUserNode = (ObjectNode) scimUser.getObjectNode();
+                customAttributeMapper.applyInboundMappings(idmUser, scimUserNode);
+                LOGGER.fine("Applied custom inbound mappings for user update: " + userId);
+            }
+            // END: Apply custom inbound mappings
+
             // Convert to JSON string
             String jsonBody = objectMapper.writeValueAsString(idmUser);
 
             LOGGER.info("Updating user: " + userId);
 
-            // BEGIN: Use WebTarget-based putResource instead of string concatenation
             // Build endpoint URL using WebTarget.path() for safe URL construction
             String baseEndpoint = restClient.getManagedUsersEndpoint();
-            // END: Use WebTarget-based putResource instead of string concatenation
 
             // Call PingIDM update API
-            Response response;
-            if (revision != null && !revision.isEmpty()) {
-                // BEGIN: Use WebTarget-based putResource with revision
-                response = restClient.putResource(baseEndpoint, userId, jsonBody, revision);
-                // END: Use WebTarget-based putResource with revision
-            } else {
-                // BEGIN: Use WebTarget-based putResource without revision
-                response = restClient.putResource(baseEndpoint, userId, jsonBody);
-                // END: Use WebTarget-based putResource without revision
-            }
+            Response response = restClient.putResource(baseEndpoint, userId, jsonBody, revision);
 
             // Read response immediately
             int statusCode = response.getStatus();
             String responseBody = response.readEntity(String.class);
-
-            // Check if user exists
-            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
-                throw new ResourceNotFoundException("User not found: " + userId);
-            }
 
             // Check response status
             if (statusCode != Response.Status.OK.getStatusCode()) {
@@ -224,10 +273,20 @@ public class PingIdmUserService {
             }
 
             // Parse response body
-            ObjectNode updatedUser = (ObjectNode) objectMapper.readTree(responseBody);
+            ObjectNode updatedIdmUser = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert back to SCIM format
-            return attributeMapper.pingIdmToScim(updatedUser);
+            GenericScimResource scimResult = attributeMapper.pingIdmToScim(updatedIdmUser);
+
+            // BEGIN: Apply custom outbound mappings (PingIDM -> SCIM)
+            if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+                ObjectNode scimResultNode = (ObjectNode) scimResult.getObjectNode();
+                customAttributeMapper.applyOutboundMappings(scimResultNode, updatedIdmUser);
+                LOGGER.fine("Applied custom outbound mappings for updated user: " + userId);
+            }
+            // END: Apply custom outbound mappings
+
+            return scimResult;
 
         } catch (ScimException e) {
             throw e;
@@ -241,7 +300,7 @@ public class PingIdmUserService {
      * Patch a user in PingIDM (partial update).
      *
      * @param userId the user ID to patch
-     * @param patchOperations the SCIM patch operations (as JSON string)
+     * @param patchOperations the PingIDM patch operations JSON string
      * @param revision the revision/etag for optimistic locking (optional)
      * @return the patched user as SCIM resource
      * @throws ScimException if patch fails
@@ -251,31 +310,15 @@ public class PingIdmUserService {
         try {
             LOGGER.info("Patching user: " + userId);
 
-            // BEGIN: Use WebTarget-based patchResource instead of string concatenation
-            // Build endpoint URL using WebTarget.path() for safe URL construction
+            // Build endpoint URL
             String baseEndpoint = restClient.getManagedUsersEndpoint();
-            // END: Use WebTarget-based patchResource instead of string concatenation
 
             // Call PingIDM patch API
-            Response response;
-            if (revision != null && !revision.isEmpty()) {
-                // BEGIN: Use WebTarget-based patchResource with revision
-                response = restClient.patchResource(baseEndpoint, userId, patchOperations, revision);
-                // END: Use WebTarget-based patchResource with revision
-            } else {
-                // BEGIN: Use WebTarget-based patchResource without revision
-                response = restClient.patchResource(baseEndpoint, userId, patchOperations);
-                // END: Use WebTarget-based patchResource without revision
-            }
+            Response response = restClient.patchResource(baseEndpoint, userId, patchOperations, revision);
 
             // Read response immediately
             int statusCode = response.getStatus();
             String responseBody = response.readEntity(String.class);
-
-            // Check if user exists
-            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
-                throw new ResourceNotFoundException("User not found: " + userId);
-            }
 
             // Check response status
             if (statusCode != Response.Status.OK.getStatusCode()) {
@@ -283,10 +326,20 @@ public class PingIdmUserService {
             }
 
             // Parse response body
-            ObjectNode patchedUser = (ObjectNode) objectMapper.readTree(responseBody);
+            ObjectNode patchedIdmUser = (ObjectNode) objectMapper.readTree(responseBody);
 
             // Convert back to SCIM format
-            return attributeMapper.pingIdmToScim(patchedUser);
+            GenericScimResource scimResult = attributeMapper.pingIdmToScim(patchedIdmUser);
+
+            // BEGIN: Apply custom outbound mappings (PingIDM -> SCIM)
+            if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+                ObjectNode scimResultNode = (ObjectNode) scimResult.getObjectNode();
+                customAttributeMapper.applyOutboundMappings(scimResultNode, patchedIdmUser);
+                LOGGER.fine("Applied custom outbound mappings for patched user: " + userId);
+            }
+            // END: Apply custom outbound mappings
+
+            return scimResult;
 
         } catch (ScimException e) {
             throw e;
@@ -307,37 +360,23 @@ public class PingIdmUserService {
         try {
             LOGGER.info("Deleting user: " + userId);
 
-            // BEGIN: Use WebTarget-based deleteResource instead of string concatenation
-            // Build endpoint URL using WebTarget.path() for safe URL construction
+            // Build endpoint URL
             String baseEndpoint = restClient.getManagedUsersEndpoint();
-            // END: Use WebTarget-based deleteResource instead of string concatenation
 
             // Call PingIDM delete API
-            Response response;
-            if (revision != null && !revision.isEmpty()) {
-                // BEGIN: Use WebTarget-based deleteResource with revision
-                response = restClient.deleteResource(baseEndpoint, userId, revision);
-                // END: Use WebTarget-based deleteResource with revision
-            } else {
-                // BEGIN: Use WebTarget-based deleteResource without revision
-                response = restClient.deleteResource(baseEndpoint, userId);
-                // END: Use WebTarget-based deleteResource without revision
-            }
+            Response response = restClient.deleteResource(baseEndpoint, userId, revision);
 
             // Read response immediately
             int statusCode = response.getStatus();
             String responseBody = response.readEntity(String.class);
 
-            // Check if user exists
-            if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
-                throw new ResourceNotFoundException("User not found: " + userId);
-            }
-
-            // Check response status
-            if (statusCode != Response.Status.OK.getStatusCode() &&
-                    statusCode != Response.Status.NO_CONTENT.getStatusCode()) {
+            // Check response status (204 No Content or 200 OK are both acceptable)
+            if (statusCode != Response.Status.NO_CONTENT.getStatusCode() &&
+                    statusCode != Response.Status.OK.getStatusCode()) {
                 handleErrorResponse(statusCode, responseBody, "Failed to delete user");
             }
+
+            LOGGER.info("User deleted successfully: " + userId);
 
         } catch (ScimException e) {
             throw e;
@@ -349,34 +388,36 @@ public class PingIdmUserService {
 
     /**
      * Search/list users from PingIDM with field selection.
-     * OPTIMIZED: Uses _countOnly=true when count=0 for better performance.
      *
      * @param queryFilter the PingIDM query filter (optional)
      * @param startIndex the 1-based start index for pagination
-     * @param count the number of results to return (0 = count only)
-     * @param fields the PingIDM fields to return (e.g., "*" for all)
+     * @param count the number of results to return (0 for count-only)
+     * @param fields the PingIDM fields to return
      * @return ListResponse containing the users
      * @throws ScimException if search fails
      */
     public ListResponse<GenericScimResource> searchUsers(String queryFilter, int startIndex, int count, String fields)
             throws ScimException {
+
+        // Handle count=0 (count-only query per RFC 7644)
+        if (count == 0) {
+            return searchUsersCountOnly(queryFilter);
+        }
+
         try {
-            // BEGIN: Optimization for count=0
-            if (count == 0) {
-                // Use efficient count-only query
-                return searchUsersCountOnly(queryFilter);
-            }
-            // END: Optimization for count=0
+            LOGGER.info(String.format("Searching users: filter=%s, startIndex=%d, count=%d, fields=%s",
+                    queryFilter, startIndex, count, fields));
 
-            LOGGER.info("Searching users with filter: " + queryFilter + ", fields: " + fields);
+            // BEGIN: Append custom mapped PingIDM fields to ensure they are retrieved
+            String enhancedFields = enhanceFieldsWithCustomMappings(fields);
+            // END: Append custom mapped fields
 
-            // Build endpoint URL with query parameters
             String endpoint = restClient.getManagedUsersEndpoint();
 
             // Build query parameters
             List<String> queryParams = new ArrayList<>();
 
-            // Add query filter parameter
+            // Add query filter
             if (queryFilter != null && !queryFilter.isEmpty()) {
                 queryParams.add("_queryFilter");
                 queryParams.add(queryFilter);
@@ -385,22 +426,24 @@ public class PingIdmUserService {
                 queryParams.add("true");
             }
 
-            // Add pagination parameters (convert SCIM 1-based to PingIDM 0-based)
-            int pageOffset = Math.max(0, startIndex - 1);
-            queryParams.add("_pageSize");
-            queryParams.add(String.valueOf(count));
+            // Add pagination
+            int pageOffset = startIndex - 1; // Convert 1-based to 0-based
             queryParams.add("_pagedResultsOffset");
             queryParams.add(String.valueOf(pageOffset));
+            queryParams.add("_pageSize");
+            queryParams.add(String.valueOf(count));
 
-            // Add total paged results policy
+            // Add total results policy for accurate counts
             queryParams.add("_totalPagedResultsPolicy");
             queryParams.add("EXACT");
 
-            // Add fields parameter
-            queryParams.add("_fields");
-            queryParams.add(fields != null ? fields : "*");
+            // Add field selection
+            if (enhancedFields != null && !enhancedFields.equals("*")) {
+                queryParams.add("_fields");
+                queryParams.add(enhancedFields);
+            }
 
-            // Log the full URL for debugging
+            // Log the URL for debugging
             StringBuilder urlBuilder = new StringBuilder(endpoint);
             urlBuilder.append("?");
             for (int i = 0; i < queryParams.size(); i += 2) {
@@ -431,6 +474,14 @@ public class PingIdmUserService {
                 for (JsonNode userNode : results) {
                     ObjectNode idmUser = (ObjectNode) userNode;
                     GenericScimResource scimUser = attributeMapper.pingIdmToScim(idmUser);
+
+                    // BEGIN: Apply custom outbound mappings for each user in search results
+                    if (customAttributeMapper != null && customAttributeMapper.hasCustomMappings()) {
+                        ObjectNode scimUserNode = (ObjectNode) scimUser.getObjectNode();
+                        customAttributeMapper.applyOutboundMappings(scimUserNode, idmUser);
+                    }
+                    // END: Apply custom outbound mappings
+
                     resources.add(scimUser);
                 }
             }
@@ -534,8 +585,8 @@ public class PingIdmUserService {
             return new ListResponse<>(
                     totalResults,           // totalResults
                     new ArrayList<>(),      // Empty resources array
-                    1,                      // startIndex (doesn't matter for count=0)
-                    0                       // itemsPerPage = 0
+                    1,                       // startIndex (doesn't matter for count=0)
+                    0                        // itemsPerPage = 0
             );
 
         } catch (ScimException e) {
@@ -545,6 +596,37 @@ public class PingIdmUserService {
             throw new BadRequestException("Failed to count users: " + e.getMessage());
         }
     }
+
+    // BEGIN: Helper method to enhance fields with custom mappings
+    /**
+     * Enhance the fields parameter to include custom-mapped PingIDM attributes.
+     *
+     * <p>This ensures that when specific fields are requested, we also retrieve
+     * the custom-mapped PingIDM attributes so they can be included in the SCIM response.</p>
+     *
+     * @param fields the original fields parameter
+     * @return enhanced fields including custom-mapped attributes
+     */
+    private String enhanceFieldsWithCustomMappings(String fields) {
+        if (customAttributeMapper == null || !customAttributeMapper.hasCustomMappings()) {
+            return fields;
+        }
+
+        // If requesting all fields, no need to enhance
+        if (fields == null || fields.equals("*")) {
+            return fields;
+        }
+
+        // Get the custom PingIDM fields
+        String customFields = customAttributeMapper.getPingIdmFieldsParameter();
+        if (customFields == null || customFields.isEmpty()) {
+            return fields;
+        }
+
+        // Append custom fields
+        return fields + "," + customFields;
+    }
+    // END: Helper method to enhance fields with custom mappings
 
     /**
      * Extract total count from PingIDM response.
