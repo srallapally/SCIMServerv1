@@ -134,6 +134,48 @@
       "required": false,
       "mutability": "readWrite",
       "returned": "default"
+    },
+    {
+      "_comment": "=== Manager attribute (complex type per RFC 7643 Section 4.3) ===",
+      "scimPath": "manager",
+      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+      "pingIdmAttribute": "manager",
+      "type": "complex",
+      "description": "The user's manager. A complex type with subattributes including value, $ref, and displayName",
+      "multiValued": false,
+      "required": false,
+      "mutability": "readWrite",
+      "returned": "default",
+      "subAttributes": [
+        {
+          "name": "value",
+          "type": "string",
+          "description": "The ID of the user's manager",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default"
+        },
+        {
+          "name": "$ref",
+          "type": "reference",
+          "description": "The URI of the corresponding User resource",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readWrite",
+          "returned": "default",
+          "referenceTypes": ["User"]
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "description": "The displayName of the user's manager",
+          "multiValued": false,
+          "required": false,
+          "mutability": "readOnly",
+          "returned": "default"
+        }
+      ]
     }
   ]
 }
