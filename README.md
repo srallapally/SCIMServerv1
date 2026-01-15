@@ -5,7 +5,6 @@ A Java-based SCIM 2.0 (System for Cross-domain Identity Management) server that 
 ## Features
 
 - **SCIM 2.0 Compliant**: Supports standard SCIM 2.0 operations for Users and Groups.
-- **Dynamic Schema Management**: Automatically fetches and translates PingIDM schema to SCIM schema.
 - **OAuth2 Authentication**: Implements Bearer token authentication for secure API access.
 - **Embedded Jetty**: Lightweight, standalone executable using Jetty and Jersey.
 - **Attribute Mapping**: Configurable mapping between SCIM attributes and PingIDM managed object fields.
