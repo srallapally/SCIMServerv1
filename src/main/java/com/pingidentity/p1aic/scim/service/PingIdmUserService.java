@@ -12,6 +12,7 @@ import com.pingidentity.p1aic.scim.mapping.CustomAttributeMapperService;
 import com.unboundid.scim2.common.GenericScimResource;
 import com.unboundid.scim2.common.exceptions.BadRequestException;
 import com.unboundid.scim2.common.exceptions.ResourceNotFoundException;
+import com.unboundid.scim2.common.exceptions.ResourceConflictException; // Import Conflict Exception
 import com.unboundid.scim2.common.exceptions.ScimException;
 import com.unboundid.scim2.common.messages.ListResponse;
 import jakarta.inject.Inject;
@@ -699,7 +700,10 @@ public class PingIdmUserService {
         if (statusCode == Response.Status.NOT_FOUND.getStatusCode()) {
             throw new ResourceNotFoundException(errorMessage);
         } else if (statusCode == Response.Status.CONFLICT.getStatusCode()) {
-            throw new BadRequestException(errorMessage);
+            throw new ResourceConflictException(errorMessage); // 409 Conflict
+        } else if (statusCode == 403) {
+            // FIX: Map PingIDM 403 (Policy/Unique Violation) to SCIM 409 Conflict
+            throw new ResourceConflictException(errorMessage + " (Policy Violation/Duplicate)");
         } else if (statusCode == Response.Status.BAD_REQUEST.getStatusCode()) {
             throw new BadRequestException(errorMessage);
         } else {
