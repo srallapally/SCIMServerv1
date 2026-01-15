@@ -1,46 +1,126 @@
 {
   "$schema": "./scim-attribute-mappings.schema.json",
-  "_comment": "SCIM Custom Attribute Mappings - Map PingIDM custom attributes to standard SCIM attributes",
-  "_documentation": "https://docs.pingidentity.com/scim-server/custom-mappings",
-
+  "_comment": "SCIM Custom Attribute Mappings - Corrected & Complete",
   "customAttributeMappings": [
     {
-      "_comment": "=== Core User Schema Attributes ==="
+      "_comment": "=== 1. Core Identity Attributes (Native PingIDM Fields) ==="
     },
     {
-      "scimPath": "name.middleName",
+      "scimPath": "userName",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frIndexedString1",
+      "pingIdmAttribute": "userName",
       "type": "string",
-      "description": "The middle name(s) of the User"
+      "description": "Unique identifier for the User",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "name.givenName",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "givenName",
+      "type": "string",
+      "description": "First Name",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "name.familyName",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "sn",
+      "type": "string",
+      "description": "Last Name",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "emails",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "mail",
+      "type": "string",
+      "description": "Primary/Work Email (Single Value)",
+      "handledByCode": true
+    },
+    {
+      "scimPath": "active",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "accountStatus",
+      "type": "boolean",
+      "description": "Maps SCIM active (bool) to IDM active/inactive (string)",
+      "handledByCode": true
+    },
+    {
+      "scimPath": "password",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "password",
+      "type": "string",
+      "description": "User Password",
+      "handledByCode": true
+    },
+    {
+      "_comment": "=== 2. Core Attributes Mapped to fr* Slots (Handled by Code) ==="
+    },
+    {
+      "scimPath": "externalId",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString7",
+      "type": "string",
+      "description": "External Identifier",
+      "handledByCode": true
+    },
+    {
+      "scimPath": "displayName",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString14",
+      "type": "string",
+      "description": "The name of the User, suitable for display to end-users",
+      "handledByCode": true
+    },
+    {
+      "scimPath": "name.formatted",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString10",
+      "type": "string",
+      "description": "Full formatted name",
+      "handledByCode": true
+    },
+    {
+      "scimPath": "nickName",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString8",
+      "type": "string",
+      "handledByCode": true
+    },
+    {
+      "scimPath": "userType",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString9",
+      "type": "string",
+      "handledByCode": true
     },
     {
       "scimPath": "title",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString2",
       "type": "string",
-      "description": "The user's title"
+      "handledByCode": true
     },
     {
       "scimPath": "preferredLanguage",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frUnindexedString1",
       "type": "string",
-      "description": "User's preferred language"
+      "handledByCode": true
     },
     {
       "scimPath": "locale",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString3",
       "type": "string",
-      "description": "User's default location"
+      "handledByCode": true
     },
     {
       "scimPath": "timezone",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
       "pingIdmAttribute": "frIndexedString4",
       "type": "string",
-      "description": "User's time zone"
+      "handledByCode": true
     },
     {
       "scimPath": "profileUrl",
@@ -48,100 +128,151 @@
       "pingIdmAttribute": "frIndexedString5",
       "type": "reference",
       "referenceTypes": ["external"],
-      "description": "URL to online profile"
+      "handledByCode": true
     },
     {
-      "_comment": "=== Mapped Complex/Core Attributes (Previously Hardcoded) ==="
+      "_comment": "=== 3. Complex Attributes (Serialized Lists) ==="
     },
     {
       "scimPath": "addresses",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frIndexedString7",
+      "pingIdmAttribute": "frIndexedMultivalued1",
       "type": "complex",
       "multiValued": true,
-      "description": "Physical mailing addresses (Serialized JSON)"
-    },
-    {
-      "scimPath": "nickName",
-      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frIndexedString8",
-      "type": "string",
-      "description": "Casual name of the User"
-    },
-    {
-      "scimPath": "userType",
-      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frIndexedString9",
-      "type": "string",
-      "description": "Organization-to-user relationship"
+      "description": "Physical mailing addresses",
+      "handledByCode": true
     },
     {
       "scimPath": "roles",
       "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
-      "pingIdmAttribute": "frIndexedString10",
+      "pingIdmAttribute": "frIndexedMultivalued2",
       "type": "complex",
       "multiValued": true,
-      "description": "List of roles (Serialized JSON)"
+      "description": "List of roles",
+      "handledByCode": true
     },
     {
-      "_comment": "=== Enterprise User Extension Attributes ==="
+      "scimPath": "phoneNumbers",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedMultivalued3",
+      "type": "complex",
+      "multiValued": true,
+      "description": "Phone numbers",
+      "handledByCode": true
     },
     {
-      "scimPath": "employeeNumber",
-      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-      "pingIdmAttribute": "frIndexedString6",
-      "type": "string",
-      "description": "Numeric or alphanumeric identifier"
+      "scimPath": "emails",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedMultivalued4",
+      "type": "complex",
+      "multiValued": true,
+      "description": "Secondary/Other Emails (excludes Primary/Work mapped to mail)",
+      "handledByCode": true
     },
     {
-      "scimPath": "costCenter",
-      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-      "pingIdmAttribute": "frUnindexedString2",
-      "type": "string",
-      "description": "Name of a cost center"
+      "scimPath": "ims",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedMultivalued5",
+      "type": "complex",
+      "multiValued": true,
+      "description": "Instant Messaging Addresses",
+      "handledByCode": true
     },
     {
-      "scimPath": "organization",
-      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-      "pingIdmAttribute": "frUnindexedString3",
-      "type": "string",
-      "description": "Name of an organization"
+      "scimPath": "photos",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frUnindexedMultivalued1",
+      "type": "complex",
+      "multiValued": true,
+      "description": "Profile Photos",
+      "handledByCode": true
     },
     {
-      "scimPath": "division",
-      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-      "pingIdmAttribute": "frUnindexedString4",
-      "type": "string",
-      "description": "Name of a division"
+      "scimPath": "entitlements",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frUnindexedMultivalued2",
+      "type": "complex",
+      "multiValued": true,
+      "description": "Entitlements",
+      "handledByCode": true
     },
     {
-      "scimPath": "department",
-      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-      "pingIdmAttribute": "frUnindexedString5",
-      "type": "string",
-      "description": "Name of a department"
+      "scimPath": "x509Certificates",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frUnindexedMultivalued3",
+      "type": "complex",
+      "multiValued": true,
+      "description": "X.509 Certificates",
+      "handledByCode": true
+    },
+    {
+      "_comment": "=== 4. Enterprise User Attributes ==="
     },
     {
       "scimPath": "manager",
       "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
       "pingIdmAttribute": "manager",
       "type": "complex",
-      "description": "The user's manager",
-      "subAttributes": [
-        {
-          "name": "value",
-          "type": "string"
-        },
-        {
-          "name": "$ref",
-          "type": "reference"
-        },
-        {
-          "name": "displayName",
-          "type": "string",
-          "mutability": "readOnly"
-        }
-      ]
+      "handledByCode": true
+    },
+    {
+      "scimPath": "employeeNumber",
+      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+      "pingIdmAttribute": "frIndexedString6",
+      "type": "string",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "costCenter",
+      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+      "pingIdmAttribute": "frUnindexedString2",
+      "type": "string",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "organization",
+      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+      "pingIdmAttribute": "frUnindexedString3",
+      "type": "string",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "division",
+      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+      "pingIdmAttribute": "frUnindexedString4",
+      "type": "string",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "department",
+      "scimSchema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+      "pingIdmAttribute": "frUnindexedString5",
+      "type": "string",
+      "handledByCode": false
+    },
+    {
+      "_comment": "=== 5. Other Generic Attributes ==="
+    },
+    {
+      "scimPath": "name.middleName",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString1",
+      "type": "string",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "name.honorificPrefix",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString11",
+      "type": "string",
+      "handledByCode": false
+    },
+    {
+      "scimPath": "name.honorificSuffix",
+      "scimSchema": "urn:ietf:params:scim:schemas:core:2.0:User",
+      "pingIdmAttribute": "frIndexedString12",
+      "type": "string",
+      "handledByCode": false
     }
   ]
 }

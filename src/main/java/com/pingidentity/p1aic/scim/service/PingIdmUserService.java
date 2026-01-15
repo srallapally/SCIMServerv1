@@ -34,10 +34,10 @@ import java.util.logging.Logger;
  *
  * <p>Enhancements:</p>
  * <ul>
- *   <li>Uses _countOnly=true for count=0 requests (RFC 7644 compliance)</li>
- *   <li>Supports efficient total count retrieval without fetching resources</li>
- *   <li>Supports field selection for optimized data retrieval</li>
- *   <li>Applies custom attribute mappings for inbound and outbound conversions</li>
+ * <li>Uses _countOnly=true for count=0 requests (RFC 7644 compliance)</li>
+ * <li>Supports efficient total count retrieval without fetching resources</li>
+ * <li>Supports field selection for optimized data retrieval</li>
+ * <li>Applies custom attribute mappings for inbound and outbound conversions</li>
  * </ul>
  */
 public class PingIdmUserService {
@@ -398,8 +398,8 @@ public class PingIdmUserService {
      *
      * <p>This method performs two calls to PingIDM:</p>
      * <ol>
-     *   <li>A count-only query to get accurate totalResults (required for SCIM compliance)</li>
-     *   <li>A paginated query to get the actual resources</li>
+     * <li>A count-only query to get accurate totalResults (required for SCIM compliance)</li>
+     * <li>A paginated query to get the actual resources</li>
      * </ol>
      *
      * <p>PingIDM requires _countOnly=true with _totalPagedResultsPolicy=EXACT to return
@@ -738,10 +738,16 @@ public class PingIdmUserService {
                 }
 
                 // Also remove from top level if UserAttributeMapper promoted it
-                scimPathsToRemove.add(leafName);
+                // FIX: Only remove if the SCIM name differs from the IDM name
+                if (!leafName.equals(mapping.getPingIdmAttribute())) {
+                    scimPathsToRemove.add(leafName);
+                }
             } else {
                 // Top-level attributes
-                scimPathsToRemove.add(mapping.getScimPath());
+                // FIX: Only remove if the SCIM name differs from the IDM name
+                if (!mapping.getScimPath().equals(mapping.getPingIdmAttribute())) {
+                    scimPathsToRemove.add(mapping.getScimPath());
+                }
             }
         }
 
